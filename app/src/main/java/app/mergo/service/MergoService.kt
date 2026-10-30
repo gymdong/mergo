@@ -18,12 +18,10 @@ import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.inputmethod.InputMethodManager
 import app.mergo.BuildConfig
+import app.mergo.ai.AndroidVoiceIO
+import app.mergo.ai.MergoAi
 import app.mergo.core.MergoController
-import app.mergo.core.fakes.ChoiceBrain
-import app.mergo.core.fakes.DefaultSettings
-import app.mergo.core.fakes.NoAgent
 import app.mergo.core.fakes.NoGraceListener
-import app.mergo.core.fakes.SilentVoice
 import app.mergo.detect.Cooldown
 import app.mergo.detect.DetectorConfig
 import app.mergo.detect.StuckDetector
@@ -41,6 +39,7 @@ import app.mergo.recipe.OpenPreviousApp
 import app.mergo.recipe.RestoreVideo
 import app.mergo.recipe.SetVolume
 import app.mergo.recipe.SkipAd
+import app.mergo.settings.MergoSettings
 import app.mergo.ui.OverlayUi
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -51,7 +50,7 @@ import java.io.File
 
 /**
  * 머고의 접근성 서비스. 이벤트를 텍스트 기록으로 바꿔 감지기에 넣고, 레시피가 화면을 조작하는 창구가 된다.
- * 부품 조립도 여기서 한다. AI 쪽(Brain, VoiceIO, ScreenAgent, 설정)은 지금은 가짜 구현을 쓴다.
+ * 부품 조립도 여기서 한다. 유예 듣기(Vosk)만 아직 가짜 구현을 쓴다.
  */
 class MergoService : AccessibilityService() {
     private val scope = MainScope()
@@ -62,6 +61,7 @@ class MergoService : AccessibilityService() {
     private lateinit var device: AndroidDevice
     private lateinit var media: MediaTitleSource
     private lateinit var overlay: OverlayUi
+    private lateinit var voice: AndroidVoiceIO
     private lateinit var timeline: TimelineBuffer
     private lateinit var controller: MergoController
 
@@ -106,8 +106,9 @@ class MergoService : AccessibilityService() {
             clock, ignoredPkgs = config.launcherPkgs + config.ignoredPkgs, titleByCountdown = config.requireCountdown,
         )
         val detector = StuckDetector(clock, config, cooldown) { baseline.current?.mediaTitle }
-        val voice = SilentVoice()
-        val agent: ScreenAgent = NoAgent()
+        val settings = MergoSettings(this)
+        voice = AndroidVoiceIO(this)
+        val agent: ScreenAgent = MergoAi.screenAgent(screen, voice)
         val currentTitle = { currentVideoTitle() }
         val recipes: Map<String, Recipe> = listOf(
             RestoreVideo(screen, device, currentTitle, agent),
@@ -123,7 +124,7 @@ class MergoService : AccessibilityService() {
         overlay = OverlayUi(this, onHelp = { controller.launchHelp() }, onHelpLongPress = { dumpForDebug() })
         controller = MergoController(
             scope, clock, timeline, baseline, detector, cooldown, recipes,
-            brain = ChoiceBrain(), voice = voice, overlay = overlay, settings = DefaultSettings(),
+            brain = MergoAi.brain(voice, settings), voice = voice, overlay = overlay, settings = settings,
             familyLog = FamilyLog(File(filesDir, "family_log.json")),
             liveVolume = { device.volume() }, liveOnline = { device.isOnline() },
             grace = NoGraceListener(),
@@ -200,6 +201,7 @@ class MergoService : AccessibilityService() {
 
     override fun onDestroy() {
         if (::overlay.isInitialized) overlay.removeAll()
+        if (::voice.isInitialized) voice.close()
         volumeObserver?.let { contentResolver.unregisterContentObserver(it) }
         volumeReceiver?.let { runCatching { unregisterReceiver(it) } }
         debugReceiver?.let { runCatching { unregisterReceiver(it) } }

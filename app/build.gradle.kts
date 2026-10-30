@@ -25,7 +25,7 @@ android {
 
         // API 키는 local.properties에만 둔다. 없으면 LLM 호출만 비활성화된다.
         buildConfigField("String", "LLM_PROVIDER", "\"${localProp("LLM_PROVIDER", "gemini")}\"")
-        buildConfigField("String", "GEMINI_MODEL", "\"${localProp("GEMINI_MODEL", "gemini-flash-latest")}\"")
+        buildConfigField("String", "GEMINI_MODEL", "\"${localProp("GEMINI_MODEL", "gemini-3.5-flash-lite")}\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"${localProp("GEMINI_API_KEY")}\"")
         buildConfigField("String", "CLAUDE_MODEL", "\"${localProp("CLAUDE_MODEL", "claude-haiku-5-5")}\"")
         buildConfigField("String", "CLAUDE_API_KEY", "\"${localProp("CLAUDE_API_KEY")}\"")

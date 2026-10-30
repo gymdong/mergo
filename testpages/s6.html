@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>우리 동네 소식</title>
+<style>
+  body { margin: 0; padding: 20px 20px 80px; font: 18px/1.6 sans-serif; color: #1d302a; background: #fafbf8; }
+  h1 { font-size: 26px; }
+  #cover { display: none; position: fixed; inset: 0; background: #1d302a; color: #fff; text-align: center; }
+  #cover.show { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  #cover p { font-size: 22px; margin: 0 24px 28px; }
+  #install { font-size: 26px; padding: 22px 56px; border: 0; border-radius: 14px; background: #ffb300; color: #1d302a; font-weight: 700; }
+  #close { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; color: #8fa39b; font-size: 14px; line-height: 20px; }
+  #result { position: fixed; left: 0; right: 0; bottom: 0; padding: 14px; font-size: 20px; text-align: center; background: #e7ebe4; }
+</style>
+</head>
+<body>
+<h1>우리 동네 소식</h1>
+<p>이번 주말 동네 공원에서 작은 음악회가 열립니다. 어르신 합창단과 어린이 합창단이 함께 무대에 오르며, 누구나 자유롭게 들으러 오실 수 있습니다.</p>
+<p>음악회는 토요일 오후 세 시에 시작하고, 비가 오면 복지관 강당으로 자리를 옮깁니다.</p>
+
+<div id="cover" role="dialog">
+  <div id="closeSlot"></div>
+  <p>지금 받으면 더 빨라져요</p>
+  <button id="install" type="button">설치하기</button>
+</div>
+<div id="result" aria-live="polite"></div>
+
+<script>
+  var hard = new URLSearchParams(location.search).get('hard') === '1';
+  var cover = document.getElementById('cover');
+  var result = document.getElementById('result');
+  var close = document.createElement(hard ? 'div' : 'button');
+  close.id = 'close';
+  if (hard) {
+    close.innerHTML = '&nbsp;';
+  } else {
+    close.type = 'button';
+    close.textContent = '×';
+  }
+  close.addEventListener('click', function () {
+    cover.classList.remove('show');
+    result.textContent = '✅ 닫힘';
+  });
+  document.getElementById('closeSlot').appendChild(close);
+  document.getElementById('install').addEventListener('click', function () {
+    result.textContent = '❌ 설치 눌림';
+  });
+  setTimeout(function () { cover.classList.add('show'); }, 2000);
+</script>
+</body>
+</html>

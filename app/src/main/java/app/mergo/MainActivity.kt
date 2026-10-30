@@ -16,8 +16,11 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import app.mergo.report.ReportActivity
+import app.mergo.report.bigButton
 import app.mergo.service.MediaListener
 import app.mergo.service.MergoService
+import app.mergo.settings.SettingsActivity
 
 /**
  * 처음 설치할 때 가족이 보는 화면. 시안의 '머고 소개'와 '권한 설정'을 한 화면에 담았다.
@@ -59,6 +62,8 @@ class MainActivity : Activity() {
         col.addView(permission("음성 듣기", "도와줘 버튼을 누를 때만 들어요", {
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         }) { requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1) })
+        col.addView(bigButton("설정") { startActivity(Intent(this, SettingsActivity::class.java)) })
+        col.addView(bigButton("가족 리포트", filled = false) { startActivity(Intent(this, ReportActivity::class.java)) })
         setContentView(ScrollView(this).apply { setBackgroundColor(BG); addView(col) })
     }
 

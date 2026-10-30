@@ -61,5 +61,12 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <activity
+            android:name=".settings.SettingsActivity"
+            android:theme="@style/Theme.Mergo" />
+        <activity
+            android:name=".report.ReportActivity"
+            android:theme="@style/Theme.Mergo" />
     </application>
 </manifest>
