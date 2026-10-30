@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.util.TypedValue
@@ -16,6 +17,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import app.mergo.report.ReportActivity
 import app.mergo.report.bigButton
 import app.mergo.service.MediaListener
@@ -62,6 +64,12 @@ class MainActivity : Activity() {
         col.addView(permission("음성 듣기", "도와줘 버튼을 누를 때만 들어요", {
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         }) { requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1) })
+        col.addView(permission("화면 설정 바꾸기", "밝기와 글자 크기를 직접 되돌려요 (설정에서 머고를 허용)", {
+            Settings.System.canWrite(this)
+        }) {
+            runCatching { startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName"))) }
+                .onFailure { Toast.makeText(this, "설정 화면을 열 수 없어요", Toast.LENGTH_SHORT).show() }
+        })
         col.addView(bigButton("설정") { startActivity(Intent(this, SettingsActivity::class.java)) })
         col.addView(bigButton("가족 리포트", filled = false) { startActivity(Intent(this, ReportActivity::class.java)) })
         setContentView(ScrollView(this).apply { setBackgroundColor(BG); addView(col) })

@@ -78,12 +78,13 @@ class MergoControllerTest {
         val voice: FakeVoice = FakeVoice(),
         autoExecute: Boolean = false,
         decision: BrainDecision? = null,
+        recipeId: String = RecipeIds.RESTORE_VIDEO,
     ) {
         val clock = Clock { scope.testScheduler.currentTime }
         val cooldown = Cooldown()
         val baseline = BaselineStore(clock, emptySet())
         val detector = StuckDetector(clock, DetectorConfig(suggestAutoplay = true), cooldown) { baseline.current?.mediaTitle }
-        val recipe = FakeRecipe(RecipeIds.RESTORE_VIDEO, outcome)
+        val recipe = FakeRecipe(recipeId, outcome)
         val familyLog = FamilyLog(null)
         val brainCalls = mutableListOf<BrainContext>()
         val controller = MergoController(
@@ -100,6 +101,41 @@ class MergoControllerTest {
         )
         var liveScreen = LiveScreen(null, emptyList())
         val suggestion = Suggestion.restoreVideo(RuleId.R1_AUTOPLAY, "트로트 메들리", "autoplay", 0)
+    }
+
+    @Test
+    fun `도와줘에서 화면이 어둡다고 말하면 추가 확인 없이 밝기 레시피를 실행한다`() = runTest {
+        val env = Env(
+            this, recipeId = RecipeIds.BRIGHTEN_SCREEN,
+            decision = BrainDecision("시각 설정", RecipeIds.BRIGHTEN_SCREEN, emptyMap(), "화면을 밝게 할게요.", false),
+        )
+        env.controller.onHelp("화면이 너무 어두워")
+        assertEquals(1, env.recipe.calls.size)
+        assertTrue(env.overlay.asked.none { it == "화면을 밝게 할게요." })
+        assertEquals("verified", env.familyLog.all().single().outcome)
+    }
+
+    @Test
+    fun `도와줘의 첫 짐작을 듣는 중 밝기 문제를 말해도 다시 말할 필요 없이 실행한다`() = runTest {
+        val env = Env(
+            this, recipeId = RecipeIds.BRIGHTEN_SCREEN,
+            voice = FakeVoice(heard = "화면이 너무 어두워"),
+            decision = BrainDecision("시각 설정", RecipeIds.BRIGHTEN_SCREEN, emptyMap(), "화면을 밝게 할게요.", false),
+        )
+        videoChanged(env)
+        env.controller.onHelp()
+        assertEquals("화면이 너무 어두워", env.brainCalls.single().utterance)
+        assertEquals(1, env.recipe.calls.size)
+    }
+
+    @Test
+    fun `자동 시각 복구는 저장값 복원 파라미터로 실행하고 완료를 음성으로 알린다`() = runTest {
+        val env = Env(this, recipeId = RecipeIds.INCREASE_TEXT_SIZE)
+        env.controller.launchAutomaticDisplayRescue(RecipeIds.INCREASE_TEXT_SIZE).join()
+        assertEquals(listOf(mapOf("restore" to "true")), env.recipe.calls)
+        assertTrue(env.overlay.asked.isEmpty())
+        assertTrue(env.voice.spoken.contains("글자 크기 설정을 키웠어요"))
+        assertTrue(env.familyLog.all().single().resolved)
     }
 
     @Test

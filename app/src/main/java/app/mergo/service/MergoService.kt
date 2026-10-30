@@ -41,6 +41,9 @@ import app.mergo.model.ScreenAgent
 import app.mergo.model.ScreenEvent
 import app.mergo.recipe.OpenInternetPanel
 import app.mergo.recipe.OpenPreviousApp
+import app.mergo.recipe.BrightenScreen
+import app.mergo.recipe.IncreaseTextSize
+import app.mergo.recipe.DisplayRescueMonitor
 import app.mergo.recipe.RestoreVideo
 import app.mergo.recipe.SetVolume
 import app.mergo.recipe.SkipAd
@@ -64,6 +67,9 @@ class MergoService : AccessibilityService() {
     private lateinit var screen: AccessibilityScreen
     private lateinit var eventScreen: AccessibilityScreen
     private lateinit var device: AndroidDevice
+    private lateinit var display: AndroidDisplaySettings
+    private lateinit var displayPreferences: MergoSettings
+    private val displayMonitor = DisplayRescueMonitor()
     private lateinit var media: MediaTitleSource
     private lateinit var overlay: OverlayUi
     private lateinit var voice: AndroidVoiceIO
@@ -79,6 +85,7 @@ class MergoService : AccessibilityService() {
     private var lastSnapshotTs = 0L
     private var lastMediaTitle: String? = null
     private var volumeObserver: ContentObserver? = null
+    private var displayObserver: ContentObserver? = null
     private var volumeReceiver: BroadcastReceiver? = null
     private var debugReceiver: BroadcastReceiver? = null
     private var netCallback: ConnectivityManager.NetworkCallback? = null
@@ -91,6 +98,7 @@ class MergoService : AccessibilityService() {
         screen = AccessibilityScreen(this)
         eventScreen = AccessibilityScreen(this)
         device = AndroidDevice(this) { foreground }
+        display = AndroidDisplaySettings(this)
         media = MediaTitleSource(this)
         timeline = TimelineBuffer(clock)
 
@@ -115,6 +123,7 @@ class MergoService : AccessibilityService() {
         )
         val detector = StuckDetector(clock, config, cooldown) { baseline.current?.mediaTitle }
         val settings = MergoSettings(this)
+        displayPreferences = settings
         wake = MergoAi.speechToText()?.let { speech ->
             WakeListener(this, settings, speech, ::log) { command -> scope.launch { controller.onHelp(command) } }
         }
@@ -127,6 +136,8 @@ class MergoService : AccessibilityService() {
             OpenPreviousApp(device, baseline, screen),
             SkipAd(screen, voice),
             OpenInternetPanel(screen, device),
+            BrightenScreen(display) { settings.preferredBrightness },
+            IncreaseTextSize(display) { settings.preferredFontScale },
             object : Recipe {
                 override val id = RecipeIds.SCREEN_AGENT
                 // 에이전트의 '완료'는 LLM의 선언일 뿐이다. 목표별 검증 조건이 생기기 전까지는 검증 불가로 둔다.
@@ -149,6 +160,8 @@ class MergoService : AccessibilityService() {
         overlay.showHelpButton()
         wake?.start()
         watchDeviceState()
+        displayMonitor.onSnapshot(display.read(), settings.displayAutoRescue, settings.preferredBrightness, settings.preferredFontScale)
+        watchDisplayState()
         if (BuildConfig.DEBUG) registerDebugHear()
         controller.onDeviceState(device.volume(), device.isOnline(), userAction = false)
 
@@ -234,6 +247,7 @@ class MergoService : AccessibilityService() {
         if (::voice.isInitialized) voice.close()
         wake?.shutdown()
         volumeObserver?.let { contentResolver.unregisterContentObserver(it) }
+        displayObserver?.let { contentResolver.unregisterContentObserver(it) }
         volumeReceiver?.let { runCatching { unregisterReceiver(it) } }
         debugReceiver?.let { runCatching { unregisterReceiver(it) } }
         netCallback?.let { runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } }
@@ -297,6 +311,36 @@ class MergoService : AccessibilityService() {
         }
         getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(cb)
         netCallback = cb
+    }
+
+    /** 밝기·글자 설정의 급격한 하락만 살핀다. 가족이 저장한 값과 자동 복구 선택이 없으면 아무것도 하지 않는다. */
+    private fun watchDisplayState() {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                val prefs = displayPreferences
+                val targets = displayMonitor.onSnapshot(
+                    display.read(), prefs.displayAutoRescue && display.canWrite(),
+                    prefs.preferredBrightness, prefs.preferredFontScale,
+                )
+                if (targets.isEmpty()) return
+                scope.launch {
+                    for (recipeId in targets) controller.launchAutomaticDisplayRescue(recipeId) {
+                        val current = display.read()
+                        prefs.displayAutoRescue && display.canWrite() && when (recipeId) {
+                            RecipeIds.BRIGHTEN_SCREEN -> current.automaticBrightness != true &&
+                                (current.brightness == null || current.brightness < (prefs.preferredBrightness ?: 0))
+                            RecipeIds.INCREASE_TEXT_SIZE -> current.fontScale == null ||
+                                current.fontScale < (prefs.preferredFontScale ?: 0f)
+                            else -> false
+                        }
+                    }.join()
+                }
+            }
+        }
+        for (key in listOf(Settings.System.SCREEN_BRIGHTNESS, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.FONT_SCALE)) {
+            contentResolver.registerContentObserver(Settings.System.getUriFor(key), false, observer)
+        }
+        displayObserver = observer
     }
 
     /**

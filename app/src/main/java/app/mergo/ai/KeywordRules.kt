@@ -45,6 +45,11 @@ object KeywordRules {
      */
     private val OPEN = listOf("어딨", "어디있", "어디에있", "어데있", "열어", "켜줘", "켜주", "켜도", "켜봐", "틀어줘", "틀어주")
 
+    /** 화면 설정은 잘못 바꾸면 더 보이지 않는다. 명확히 '밝게/크게' 요청한 말만 받는다. */
+    private val BRIGHTEN = listOf("어두", "깜깜", "밝게", "밝혀", "밝기올", "밝기높", "밝기낮")
+    private val FONT_GROW = listOf("작", "키워", "크게", "늘려", "확대", "안보")
+    private val VISUAL_NEGATION = listOf("하지마", "하지말", "올리지마", "키우지마", "늘리지마", "바꾸지마", "건드리지마")
+
     fun normalize(text: String): String =
         text.lowercase().filter { it.isLetterOrDigit() }
 
@@ -60,6 +65,12 @@ object KeywordRules {
         var soundButAudible = false
 
         fun hasAny(words: List<String>) = words.any { it in text }
+
+        val visual = listOfNotNull(
+            RecipeIds.BRIGHTEN_SCREEN.takeIf { isBrightenRequest(text) },
+            RecipeIds.INCREASE_TEXT_SIZE.takeIf { isIncreaseTextRequest(text) },
+        )
+        if (visual.isNotEmpty()) return KeywordMatch(visual, false, true)
 
         when {
             "광고" in text || hasAny(SKIP) ->
@@ -92,6 +103,24 @@ object KeywordRules {
 
     /** 이름으로 열어 달라는 앱. 앱 이름과 [OPEN] 말이 함께 있을 때만. [text]는 [normalize]한 발화. */
     fun openApp(text: String): KnownApps.App? = if (OPEN.any { it in text }) KnownApps.find(text) else null
+
+    fun isVisualRescueRequest(utterance: String): Boolean {
+        val text = normalize(utterance)
+        return isBrightenRequest(text) || isIncreaseTextRequest(text)
+    }
+
+    private fun isBrightenRequest(text: String): Boolean =
+        VISUAL_NEGATION.none { it in text } &&
+            listOf("어둡지", "어두운건아니", "어두운게아니", "어두운건아닌데", "깜깜하지", "밝기낮지").none { it in text } &&
+            (BRIGHTEN.any { it in text } || "밝기" in text && "낮" in text) &&
+            !listOf("너무밝", "밝기높아", "밝기올랐", "더어둡", "어둡게", "낮춰", "낮게").any { it in text } &&
+            ("화면" in text || "밝기" in text || "어두" in text || "깜깜" in text || "밝게" in text || "밝혀" in text)
+
+    private fun isIncreaseTextRequest(text: String): Boolean =
+        VISUAL_NEGATION.none { it in text } &&
+            listOf("작지않", "작지는않", "작진않", "작은게아니", "작은건아니").none { it in text } &&
+            listOf("글자", "글씨", "폰트", "텍스트").any { it in text } && FONT_GROW.any { it in text } &&
+            !listOf("너무커", "너무크", "작게", "줄여", "작아지지", "커졌").any { it in text }
 
     private fun fromDiff(diff: List<String>): List<String> = diff.mapNotNull {
         when {

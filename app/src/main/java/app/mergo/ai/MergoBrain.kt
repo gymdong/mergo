@@ -66,6 +66,8 @@ class MergoBrain(
         val noEvidence = match.candidates.isEmpty() && ctx.diff.isEmpty() && !match.hasTroubleSignal
         if (noEvidence) return outOfScope()
         if (decision.recipe == RecipeIds.OPEN_PREVIOUS_APP) return guardOpenApp(decision)
+        // LLM의 추측만으로 기기 전체의 시각 설정을 바꾸지 않는다. 명시적 발화는 위 키워드 경로가 처리한다.
+        if (decision.recipe in VISUAL_RECIPES && decision.recipe !in match.candidates) return fallbackAsk()
         // 볼륨이 켜져 있고 줄어들지도 않았으면 볼륨을 '되돌려도' 아무것도 바뀌지 않는다. 고친 척하지 않는다.
         val volumeUnchanged = ctx.diff.none { it.startsWith(DiffPrefix.VOLUME) }
         if (decision.recipe == RecipeIds.SET_VOLUME && ctx.current.volume > 0 && volumeUnchanged) return soundIsOn()
@@ -108,13 +110,14 @@ class MergoBrain(
 
     private fun decisionFor(recipe: String, ctx: BrainContext): BrainDecision {
         val auto = autoExecute()
+        val directRequest = recipe in VISUAL_RECIPES
         val say = sayFor(recipe, ctx)
         return BrainDecision(
             diagnosis = "키워드 규칙",
             recipe = recipe,
             params = paramsFor(recipe, ctx),
-            say = if (auto) say.statement else say.question,
-            confirm = !auto,
+            say = if (auto || directRequest) say.statement else say.question,
+            confirm = !auto && !directRequest,
         )
     }
 
@@ -177,6 +180,7 @@ class MergoBrain(
     private companion object {
         const val NOTICE_AFTER_MS = 1_500L
         const val MAX_QUESTIONS = 2
+        val VISUAL_RECIPES = setOf(RecipeIds.BRIGHTEN_SCREEN, RecipeIds.INCREASE_TEXT_SIZE)
 
         val SAY = mapOf(
             RecipeIds.RESTORE_VIDEO to Say("아까 보시던 영상으로 돌아갈까요?", "아까 보시던 영상으로 돌아갈게요."),
@@ -185,6 +189,8 @@ class MergoBrain(
             RecipeIds.OPEN_INTERNET_PANEL to Say("인터넷을 다시 연결해 볼까요?", "인터넷을 다시 연결해 볼게요."),
             RecipeIds.SKIP_AD to Say("광고 넘길까요?", "광고를 넘길게요."),
             RecipeIds.SCREEN_AGENT to Say("광고를 닫아 드릴까요?", "광고를 닫아 드릴게요."),
+            RecipeIds.BRIGHTEN_SCREEN to Say("화면을 밝게 할까요?", "화면을 밝게 할게요."),
+            RecipeIds.INCREASE_TEXT_SIZE to Say("글자 크기를 키울까요?", "글자 크기를 키울게요."),
         )
     }
 }

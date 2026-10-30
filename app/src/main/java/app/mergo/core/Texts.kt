@@ -20,6 +20,8 @@ data class Texts(val progress: String, val done: String, val log: String, val fa
             RecipeIds.SKIP_AD -> Texts("광고를 넘기고 있어요", "광고를 넘겼어요", "광고를 넘겼어요", "광고를 넘기지 못했어요")
             RecipeIds.OPEN_INTERNET_PANEL -> Texts("인터넷을 다시 켜고 있어요", "인터넷을 다시 켰어요", "인터넷을 다시 켰어요", "인터넷을 켜지 못했어요")
             RecipeIds.SCREEN_AGENT -> Texts("화면을 살펴보고 있어요", "다 됐어요", "화면 문제를 해결했어요", "화면 문제를 해결하지 못했어요")
+            RecipeIds.BRIGHTEN_SCREEN -> Texts("화면을 밝게 하고 있어요", "밝기 설정을 올렸어요", "밝기 설정을 올렸어요", "밝기를 바꾸지 못했어요")
+            RecipeIds.INCREASE_TEXT_SIZE -> Texts("글자 크기를 키우고 있어요", "글자 크기 설정을 키웠어요", "글자 크기 설정을 키웠어요", "글자 크기를 바꾸지 못했어요")
             else -> Texts("도와드리고 있어요", "다 됐어요", "도와드렸어요", "해결하지 못했어요")
         }
     }

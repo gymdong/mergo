@@ -38,7 +38,9 @@ object RecipeIds {
     const val OPEN_INTERNET_PANEL = "open_internet_panel"
     const val SKIP_AD = "skip_ad"
     const val SCREEN_AGENT = "screen_agent"
+    const val BRIGHTEN_SCREEN = "brighten_screen"
+    const val INCREASE_TEXT_SIZE = "increase_text_size"
     const val ASK = "ask"
 
-    val ALL = listOf(RESTORE_VIDEO, SET_VOLUME, OPEN_PREVIOUS_APP, OPEN_INTERNET_PANEL, SKIP_AD, SCREEN_AGENT)
+    val ALL = listOf(RESTORE_VIDEO, SET_VOLUME, OPEN_PREVIOUS_APP, OPEN_INTERNET_PANEL, SKIP_AD, SCREEN_AGENT, BRIGHTEN_SCREEN, INCREASE_TEXT_SIZE)
 }
