@@ -495,7 +495,7 @@ class MergoController(
         const val AUTO_RESCUE_WAIT_MS = 60_000L
         val DONE_CHECK = Prompt("이 화면이 맞나요?", yes = "응, 맞아", no = "아니")
         val BRIGHTNESS_CHECK = Prompt("이 밝기 괜찮으세요?", yes = "응, 좋아", no = "아니")
-        val AUTO_BRIGHTNESS_CHECK = Prompt("너무 어두워서 밝게 만들었어요.", "어때요?", yes = "좋아", no = "싫어")
+        val AUTO_BRIGHTNESS_CHECK = Prompt("너무 어두워서\n밝게 만들었어요.", "어때요?", yes = "좋아", no = "싫어")
         const val UNCHECKED_LOG = "해결됐는지 확인하지 못했어요"
         const val THINKING = "살펴보고 있어요"
         const val SENSITIVE_RECIPE = "sensitive_screen"

@@ -2,6 +2,9 @@ package app.mergo.ai
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -35,12 +38,21 @@ class AndroidVoiceIO(
     private var recognizer: SpeechRecognizer? = null
     private val ready = CompletableDeferred<Boolean>()
     private val speaking = ConcurrentHashMap<String, Continuation<Unit>>()
+    private val audio = app.getSystemService(AudioManager::class.java)
+    private val spoken = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_ASSISTANT)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
+    private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        .setAudioAttributes(spoken)
+        .build()
 
     private val tts: TextToSpeech = TextToSpeech(app) { status ->
         ready.complete(status == TextToSpeech.SUCCESS)
     }
 
     init {
+        tts.setAudioAttributes(spoken)
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String) = Unit
 
@@ -60,7 +72,24 @@ class AndroidVoiceIO(
         })
     }
 
-    override suspend fun speak(text: String) = usingMic { say(text) }
+    override suspend fun speak(text: String) = usingMic { overMedia { say(text) } }
+
+    /** 영상 소리에 묻히지 않도록 말하는 동안만 다른 소리를 낮추고, 끝나면 되돌린다. */
+    private suspend fun overMedia(block: suspend () -> Unit) {
+        val granted = audio.requestAudioFocus(focus)
+        if (granted != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) Log.w(TAG, "소리 낮추기 실패: $granted")
+        try {
+            block()
+        } finally {
+            audio.abandonAudioFocusRequest(focus)
+        }
+    }
+
+    /** 디버그: 앱과 같은 엔진의 음성을 파일로 저장한다. 시연 영상에 음성만 입히는 데 쓴다. */
+    fun saveSpeech(text: String, file: java.io.File) {
+        tts.setLanguage(Locale.KOREAN)
+        tts.synthesizeToFile(text, null, file, UUID.randomUUID().toString())
+    }
 
     private suspend fun say(text: String) {
         val usable = withTimeoutOrNull(TTS_INIT_MS) { ready.await() } ?: false

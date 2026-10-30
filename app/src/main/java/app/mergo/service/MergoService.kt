@@ -385,6 +385,11 @@ class MergoService : AccessibilityService() {
                     log("호출어 옵션: $options")
                     return
                 }
+                if (intent.action == DEBUG_TTS) {
+                    val said = intent.getStringExtra("text") ?: return
+                    voice.saveSpeech(said, File(getExternalFilesDir(null), intent.getStringExtra("name") ?: "speech.wav"))
+                    return
+                }
                 val text = intent.getStringExtra("text") ?: return
                 log("디버그 듣기: $text")
                 scope.launch {
@@ -396,6 +401,7 @@ class MergoService : AccessibilityService() {
             addAction(DEBUG_DUMP)
             addAction(DEBUG_WAKE)
             addAction(DEBUG_REPLAY)
+            addAction(DEBUG_TTS)
         }, Context.RECEIVER_EXPORTED)
         debugReceiver = rc
     }
@@ -422,6 +428,8 @@ class MergoService : AccessibilityService() {
         const val DEBUG_WAKE = "app.mergo.DEBUG_WAKE"
         /** 디버그: 앱 외부 저장소의 16kHz WAV를 마이크 대신 듣는다. `--es name "voice.wav"` */
         const val DEBUG_REPLAY = "app.mergo.DEBUG_REPLAY"
+        /** 디버그: 앱의 음성을 파일로 저장한다. `--es text "말" --es name "say.wav"` */
+        const val DEBUG_TTS = "app.mergo.DEBUG_TTS"
         val USER_KINDS = setOf(EventKind.CLICK, EventKind.SCROLL, EventKind.TOUCH, EventKind.KEY, EventKind.BACK)
     }
 }
