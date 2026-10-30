@@ -326,6 +326,8 @@ class MergoController(
         const val DONE_CHECK_TIMEOUT_MS = 10_000L
         val DONE_CHECK = Prompt("이 화면이 맞나요?", yes = "응, 맞아", no = "아니")
         const val UNCHECKED_LOG = "해결됐는지 확인하지 못했어요"
-        val HELP_CHOICES = listOf("아까 보던 거", "소리가 안 나", "이거 안 꺼져", "광고 안 꺼져")
+        // 광고인지 아닌지는 어르신 대신 머고가 가린다("이거 안 꺼져"가 화면에 광고가 있으면 광고 넘기기로 간다).
+        // 무엇이 문제인지 말로 정리가 안 될 때를 위해 "이거 이상해"를 둔다.
+        val HELP_CHOICES = listOf("아까 보던 거", "소리가 안 나", "이거 안 꺼져", "이거 이상해")
     }
 }

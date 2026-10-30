@@ -94,6 +94,22 @@ class MergoBrainTest {
     }
 
     @Test
+    fun `이거 이상해를 고르면 화면 변화로 후보를 고른다`() = runTest {
+        val llm = ScriptedLlm(replies = listOf(goodReply))
+        val decision = MergoBrain(llm, RecordingVoice()).decide(ctx("이거 이상해", listOf("볼륨: 8 → 0")))
+        assertEquals(RecipeIds.SET_VOLUME, decision.recipe)
+        assertEquals(0, llm.calls)
+    }
+
+    @Test
+    fun `이거 이상해인데 화면 변화가 없으면 범위 밖으로 자르지 않고 LLM에 묻는다`() = runTest {
+        val llm = ScriptedLlm(replies = listOf(goodReply))
+        val decision = MergoBrain(llm, RecordingVoice()).decide(ctx("이거 이상해"))
+        assertEquals(1, llm.calls)
+        assertEquals(RecipeIds.RESTORE_VIDEO, decision.recipe)
+    }
+
+    @Test
     fun `자동재생 복원에는 이전 영상 제목을 넘긴다`() = runTest {
         val decision = MergoBrain(ScriptedLlm(), RecordingVoice())
             .decide(ctx("아까 보던 거", listOf("영상 제목: ○○ 트로트 → △△ 뉴스 (터치 없음)")))
