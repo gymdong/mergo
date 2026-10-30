@@ -105,6 +105,8 @@ class MergoController(
             log("유예 듣기: 해당 없는 말 '$heard'")
             return
         }
+        // 말로 되돌려 달라고 했으니 사용자가 깨어 있다.
+        detector.resumeSuggestions()
         if (!busy.compareAndSet(false, true)) return
         detector.suggestionShowing = true
         try {
@@ -129,6 +131,7 @@ class MergoController(
     suspend fun onSuggestion(s: Suggestion) {
         if (!busy.compareAndSet(false, true)) return
         detector.suggestionShowing = true
+        val shownAt = clock.now()
         try {
             log("제안 ${s.rule} target=${s.target} recipe=${s.recipeId} params=${s.params}")
             val prompt = Prompt(s.headline, s.say, eyebrow = "머고가 알아챘어요", yes = s.yesLabel, no = s.noLabel)
@@ -141,6 +144,9 @@ class MergoController(
                 cooldown.reject(s.rule, s.target, clock.now())
                 baseline.acceptCurrent(clock.now())
                 if (answer == YesNo.NO) voice.speak("알겠어요")
+                // 무응답은 못 들었거나 자는 중일 수 있다. 말풍선이 떠 있는 동안에도 움직임이 없었으면
+                // 사용자가 다시 움직일 때까지 자동 제안을 멈춘다.
+                if (answer == YesNo.NONE) detector.pauseIfNoUserSince(shownAt)
             }
         } finally {
             detector.suggestionShowing = false
@@ -150,6 +156,8 @@ class MergoController(
 
     /** 도와줘 버튼(또는 호출어)으로 불렀을 때. [utterance]가 있으면 듣기를 건너뛴다. */
     suspend fun onHelp(utterance: String? = null) {
+        // 직접 불렀으니 사용자가 깨어 있다. 무응답으로 멈춘 자동 제안을 다시 켠다.
+        detector.resumeSuggestions()
         if (!busy.compareAndSet(false, true)) return
         detector.suggestionShowing = true
         try {

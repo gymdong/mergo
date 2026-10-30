@@ -259,6 +259,96 @@ class MergoControllerTest {
         assertTrue(env.recipe.calls.isEmpty())
     }
 
+    /**
+     * 영상 [current]가 끝나 카운트다운이 뜨고 [next]로 자동재생된 뒤, 12초 동안 아무도 만지지 않는다.
+     * YouTube가 새 영상에 맞춰 목록을 스스로 스크롤하는 이벤트도 넣는다(사용자 동작이 아니다).
+     */
+    private suspend fun TestScope.autoplay(env: Env, current: String, next: String) {
+        env.controller.onScreenEvent(
+            ScreenEvent(testScheduler.currentTime, "com.google.android.youtube", current, emptyList(), false,
+                EventKind.CONTENT_CHANGED, setOf(Marker.VIDEO_PLAYER, Marker.AUTOPLAY_COUNTDOWN)),
+        )
+        delay(1_000)
+        env.play(testScheduler.currentTime, next)
+        delay(500)
+        env.controller.onScreenEvent(ScreenEvent(testScheduler.currentTime, "com.google.android.youtube", next, emptyList(), true, EventKind.SCROLL))
+        repeat(12) { delay(1_000); env.controller.tick() }
+    }
+
+    /** 영상 가를 35초 본 뒤 자동재생으로 영상 나가 나오고, 제안에 끝내 답이 없었던 상황. 그 뒤 규칙 휴식 5분을 넘긴다. */
+    private suspend fun TestScope.fellAsleep(env: Env) {
+        bubbleShowing(env)
+        delay(MergoController.BUBBLE_TIMEOUT_MS + 6 * 60_000L)
+    }
+
+    private val Env.autoplaySuggestions get() = overlay.asked.count { it == "영상이 바뀐 것 같아요" }
+
+    @Test
+    fun `자동 제안에 답이 없으면 잠든 채 자동재생이 이어져도 다시 제안하지 않는다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = null))
+        fellAsleep(env)
+        assertEquals(1, env.autoplaySuggestions)
+        autoplay(env, "영상 나", "영상 다")
+        assertEquals("무응답 뒤에는 사용자가 움직이기 전까지 조용히 있는다", 1, env.autoplaySuggestions)
+    }
+
+    /** 영상 가에서 자동재생으로 영상 나가 나와 말풍선이 뜬 직후. 말풍선은 아직 답을 기다린다. */
+    private suspend fun TestScope.bubbleShowing(env: Env) {
+        env.baseline.onDevice(8, true, 0)
+        env.play(1_000, "영상 가")
+        repeat(40) { delay(1_000); env.controller.tick() }
+        autoplay(env, "영상 가", "영상 나")
+        assertEquals(1, env.autoplaySuggestions)
+    }
+
+    @Test
+    fun `말풍선이 떠 있는 동안 화면을 만졌으면 답이 없어도 자동 제안을 멈추지 않는다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = null))
+        bubbleShowing(env)
+        env.controller.onScreenEvent(ScreenEvent(testScheduler.currentTime, "com.google.android.youtube", "영상 나", emptyList(), true, EventKind.TOUCH))
+        delay(MergoController.BUBBLE_TIMEOUT_MS + 6 * 60_000L)
+        autoplay(env, "영상 나", "영상 다")
+        assertEquals(2, env.autoplaySuggestions)
+    }
+
+    @Test
+    fun `말풍선이 떠 있는 동안 도와줘를 눌렀으면 답이 없어도 자동 제안을 멈추지 않는다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = null, choice = "아까 보던 거"))
+        bubbleShowing(env)
+        env.controller.onHelp()
+        delay(MergoController.BUBBLE_TIMEOUT_MS + 6 * 60_000L)
+        autoplay(env, "영상 나", "영상 다")
+        assertEquals(2, env.autoplaySuggestions)
+    }
+
+    @Test
+    fun `무응답 뒤 사용자가 화면을 만지면 자동 제안을 다시 한다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = null))
+        fellAsleep(env)
+        env.controller.onScreenEvent(ScreenEvent(testScheduler.currentTime, "com.google.android.youtube", "영상 나", emptyList(), true, EventKind.TOUCH))
+        delay(40_000)
+        autoplay(env, "영상 나", "영상 다")
+        assertEquals(2, env.autoplaySuggestions)
+    }
+
+    @Test
+    fun `무응답 뒤 도와줘를 부르면 자동 제안을 다시 한다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = null, choice = "아까 보던 거"))
+        fellAsleep(env)
+        env.controller.onHelp()
+        delay(40_000)
+        autoplay(env, "영상 나", "영상 다")
+        assertEquals(2, env.autoplaySuggestions)
+    }
+
+    @Test
+    fun `아니요로 거절했을 때는 규칙 휴식이 끝나면 다음 자동재생에 다시 제안한다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = YesNo.NO))
+        fellAsleep(env)
+        autoplay(env, "영상 나", "영상 다")
+        assertEquals(2, env.autoplaySuggestions)
+    }
+
     @Test
     fun `30초가 지나면 유예 듣기를 닫고 그 뒤의 말은 무시한다`() = runTest {
         val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES))

@@ -45,6 +45,11 @@ class StuckDetector(
     private var adLastSeen = Long.MIN_VALUE / 2
     private var adSuggested = false
 
+    /** 자동 제안에 답이 없으면 사용자가 다시 움직일 때까지 제안하지 않는다. 영상을 틀어 둔 채 잠들면 자동재생마다 깨우게 된다. */
+    private var pausedUntilUserAction = false
+    /** 사용자가 마지막으로 있다는 걸 보인 시각. 화면 동작과 직접 호출을 함께 센다. */
+    private var lastUserPresentTs = Long.MIN_VALUE / 2
+
     /** 말풍선이 떠 있는 동안에는 새 제안을 내지 않는다(한 번에 하나). */
     @Volatile
     var suggestionShowing: Boolean = false
@@ -54,7 +59,11 @@ class StuckDetector(
         val out = mutableListOf<Suggestion>()
         if (e.pkg in config.ignoredPkgs) return out
         val user = isUserSignal(e)
-        if (user) lastUserActionTs = e.ts
+        if (user) {
+            lastUserActionTs = e.ts
+            lastUserPresentTs = e.ts
+            pausedUntilUserAction = false
+        }
         if (e.kind == EventKind.BACK) {
             backPresses.addLast(e.ts)
             while (backPresses.size > 5) backPresses.removeFirst()
@@ -151,6 +160,22 @@ class StuckDetector(
         return g
     }
 
+    /**
+     * 제안에 답이 없을 때 부른다. 말풍선을 띄운 [since] 뒤로 사용자가 움직인 적이 없을 때만,
+     * 사용자 동작이나 [resumeSuggestions]가 오기 전까지 새 제안을 내지 않는다.
+     */
+    @Synchronized
+    fun pauseIfNoUserSince(since: Long) {
+        pausedUntilUserAction = lastUserPresentTs < since
+    }
+
+    /** 사용자가 머고를 직접 불렀을 때처럼, 화면 이벤트 밖에서 사용자가 있다는 것을 알았을 때 부른다. */
+    @Synchronized
+    fun resumeSuggestions(now: Long = clock.now()) {
+        lastUserPresentTs = now
+        pausedUntilUserAction = false
+    }
+
     /** 진행 중이던 판단을 모두 비운다. */
     @Synchronized
     fun reset() {
@@ -228,6 +253,7 @@ class StuckDetector(
 
     private fun emit(out: MutableList<Suggestion>, s: Suggestion): Emit {
         if (suggestionShowing || out.isNotEmpty()) return Emit.DEFERRED
+        if (pausedUntilUserAction) return Emit.BLOCKED
         if (cooldown.isBlocked(s.rule, s.target, s.createdAt)) return Emit.BLOCKED
         out += s
         return Emit.EMITTED
