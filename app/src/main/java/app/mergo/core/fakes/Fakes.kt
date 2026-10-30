@@ -51,14 +51,6 @@ class NoAgent : ScreenAgent {
     override suspend fun achieve(goal: String): Boolean = false
 }
 
-/** AI 쪽 유예 듣기(Vosk)가 오기 전까지. 아무것도 듣지 않는다. */
-class NoGraceListener : app.mergo.model.GraceListener {
-    override fun open(durationMs: Long, onHeard: (String) -> Unit) {
-        runCatching { Log.i("Mergo", "유예 듣기(가짜) ${durationMs}ms — B의 Vosk 구현으로 교체") }
-    }
-    override fun close() {}
-}
-
 class DefaultSettings(
     override val autoExecute: Boolean = false,
     override val wakeWord: String = "머고야",

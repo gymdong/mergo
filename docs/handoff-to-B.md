@@ -97,7 +97,9 @@ adb logcat -s 'Mergo:*'
   - `summary`는 리포트 한 줄이다. 예: "소리를 다시 켰어요"
 - 리포트 화면에서는 `FamilyLog(File(filesDir, "family_log.json")).all()`로 읽는다. 시안은 `mergo_UI.pdf`의 '이번 주 리포트'와 '도움 기록' 화면이다.
 
-## 5. 새로 생긴 일: 유예 듣기 (`GraceListener`)
+## 5. ~~새로 생긴 일: 유예 듣기 (`GraceListener`)~~
+
+> **폐지(2026-10-30).** 유예 듣기는 없애고 호출어 뒤의 말만 인식하기로 했다. A가 `GraceListener`·`GracePhrases`와 연결부를 삭제했다. 아래는 기록용이다.
 
 - **동작:** 영상이 바뀌면(자동재생이든 직접 바꿨든) A가 `open(30초, onHeard)`를 부르고, 끝나면 `close()`를 부른다. 그 사이 들은 문장을 `onHeard(text)`로 넘기면, A가 `GracePhrases`에 맞는 말인지 보고 **확인 없이** 이전 영상으로 되돌린다.
 - **왜 필요한가:** 에뮬레이터에서 확인해 보니 YouTube 플레이어 탭은 클릭 이벤트가 오지 않는다. 그래서 오조작을 화면만으로는 확신할 수 없다.

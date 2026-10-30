@@ -17,7 +17,7 @@
 | 자동 감지 | `StuckDetector`가 R1~R4 조건에 따라 제안을 만든다. 규칙에 걸리지 않는 새 상황을 자동으로 LLM에 보내지는 않는다. | `detect/StuckDetector.kt`, `service/MergoService.kt` |
 | 도와줘 판단 | `KeywordRules`가 범위 밖 발화는 제외하고 단일 후보는 즉시 고른다. 후보 0개 또는 복수면 `MergoBrain`이 LLM을 호출하며, 응답은 기존 레시피 또는 `screen_agent`/`ask`로 제한된다. 근거가 없는 답은 `guard()`가 막는다. | `ai/KeywordRules.kt:43-87`, `ai/MergoBrain.kt:22-60`, `ai/LlmPrompt.kt` |
 | 화면 에이전트 | `LlmScreenAgent`가 화면 노드를 읽고 행동 1개씩 선택해 최대 5단계·30초 반복한다. `SafetyGuard`가 위험 클릭을 차단한다. | `agent/LlmScreenAgent.kt`, `agent/SafetyGuard.kt` |
-| 연결 | 실제 `MergoBrain`·`AndroidVoiceIO`·`LlmScreenAgent`·`MergoSettings`가 연결돼 있다. 30초 유예 듣기(`GraceListener`)는 폐지하기로 했고(2026-10-30), 호출어 이후 발화만 인식하도록 B가 작업 중이다. 병합 전까지 관련 코드가 남아 있다. | `service/MergoService.kt:104-130` |
+| 연결 | 실제 `MergoBrain`·`AndroidVoiceIO`·`LlmScreenAgent`·`MergoSettings`가 연결돼 있다. 30초 유예 듣기(`GraceListener`)는 폐지했고(2026-10-30) A 쪽에서 코드를 삭제했다. 호출어 이후 발화만 인식하는 작업은 B가 진행 중이다. | `service/MergoService.kt:104-130` |
 | 기록 | `TimelineBuffer`는 최근 상황 기록, `FamilyLog`는 가족 리포트/해결 기록이다. 둘 다 학습용 라벨 저장소가 아니다. | `memory/TimelineBuffer.kt`, `memory/FamilyLog.kt` |
 
 **주의:** [`handoff-to-B.md`](./handoff-to-B.md)의 “AI 쪽은 모두 가짜”와 “테스트 72개”는 병합 전 설명이다. 현재 코드를 우선해 판단한다. 2026-10-30에 `testDebugUnitTest --rerun-tasks`에서 **110개 통과, 실패 0개**를 확인했다.

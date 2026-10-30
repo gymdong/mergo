@@ -14,7 +14,6 @@ import app.mergo.model.BrainContext
 import app.mergo.model.BrainDecision
 import app.mergo.model.Clock
 import app.mergo.model.EventKind
-import app.mergo.model.GraceListener
 import app.mergo.model.Marker
 import app.mergo.model.ScreenEvent
 import app.mergo.model.Recipe
@@ -60,14 +59,6 @@ class MergoControllerTest {
         override fun dismiss() {}
     }
 
-    class FakeGrace : GraceListener {
-        var openFor: Long? = null
-        var onHeard: ((String) -> Unit)? = null
-        var closes = 0
-        override fun open(durationMs: Long, onHeard: (String) -> Unit) { openFor = durationMs; this.onHeard = onHeard }
-        override fun close() { openFor = null; closes++ }
-    }
-
     private class FakeRecipe(override val id: String, val ok: Boolean) : Recipe {
         val calls = mutableListOf<Map<String, String>>()
         override suspend fun run(params: Map<String, String>): Boolean { calls += params; return ok }
@@ -88,7 +79,6 @@ class MergoControllerTest {
         val recipe = FakeRecipe(RecipeIds.RESTORE_VIDEO, recipeOk)
         val familyLog = FamilyLog(null)
         val brainCalls = mutableListOf<BrainContext>()
-        val graceListener = FakeGrace()
         val controller = MergoController(
             scope, clock, TimelineBuffer(clock), baseline, detector, cooldown,
             mapOf(recipe.id to recipe),
@@ -100,7 +90,6 @@ class MergoControllerTest {
             },
             voice, overlay, DefaultSettings(autoExecute = autoExecute), familyLog,
             liveVolume = { 8 }, liveOnline = { true },
-            grace = graceListener,
         )
         val suggestion = Suggestion.restoreVideo(RuleId.R1_AUTOPLAY, "트로트 메들리", "autoplay", 0)
     }
@@ -232,33 +221,6 @@ class MergoControllerTest {
     private fun Env.play(ts: Long, title: String, user: Boolean = false) =
         controller.onScreenEvent(ScreenEvent(ts, "com.google.android.youtube", title, emptyList(), user, EventKind.CONTENT_CHANGED, setOf(Marker.VIDEO_PLAYER)))
 
-    /** 영상 가를 35초 본 뒤(정상 상태), 카운트다운 없이 영상 나로 넘어간 상황. */
-    private suspend fun TestScope.mistouched(env: Env) {
-        env.baseline.onDevice(8, true, 0)
-        env.play(1_000, "영상 가")
-        for (t in 2_000L..40_000L step 1_000L) { delay(1_000); env.controller.tick() }
-        env.play(testScheduler.currentTime, "영상 나")
-        env.controller.tick()
-    }
-
-    @Test
-    fun `영상이 넘어가면 30초 유예 듣기를 열고, 잘못 눌렀다는 말에 확인 없이 되돌린다`() = runTest {
-        val env = Env(this, overlay = FakeOverlay(answers = mapOf("이 화면이 맞나요?" to YesNo.YES)))
-        mistouched(env)
-        assertEquals(30_000L, env.graceListener.openFor)
-        env.controller.onGraceHeard("머고야 잘못 눌렀다")
-        assertEquals(listOf(mapOf("title" to "영상 가", "mode" to "mistouch")), env.recipe.calls)
-        assertTrue("되돌릴지 묻지 않는다", "영상이 바뀐 것 같아요" !in env.overlay.asked)
-    }
-
-    @Test
-    fun `유예 중이라도 정해진 문장이 아니면 움직이지 않는다`() = runTest {
-        val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES))
-        mistouched(env)
-        env.controller.onGraceHeard("오늘 날씨가 참 좋네요")
-        assertTrue(env.recipe.calls.isEmpty())
-    }
-
     /**
      * 영상 [current]가 끝나 카운트다운이 뜨고 [next]로 자동재생된 뒤, 12초 동안 아무도 만지지 않는다.
      * YouTube가 새 영상에 맞춰 목록을 스스로 스크롤하는 이벤트도 넣는다(사용자 동작이 아니다).
@@ -349,13 +311,4 @@ class MergoControllerTest {
         assertEquals(2, env.autoplaySuggestions)
     }
 
-    @Test
-    fun `30초가 지나면 유예 듣기를 닫고 그 뒤의 말은 무시한다`() = runTest {
-        val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES))
-        mistouched(env)
-        repeat(31) { delay(1_000); env.controller.tick() }
-        assertEquals(null, env.graceListener.openFor)
-        env.controller.onGraceHeard("잘못 눌렀다")
-        assertTrue(env.recipe.calls.isEmpty())
-    }
 }

@@ -21,7 +21,6 @@ import app.mergo.BuildConfig
 import app.mergo.ai.AndroidVoiceIO
 import app.mergo.ai.MergoAi
 import app.mergo.core.MergoController
-import app.mergo.core.fakes.NoGraceListener
 import app.mergo.detect.Cooldown
 import app.mergo.detect.DetectorConfig
 import app.mergo.detect.StuckDetector
@@ -127,7 +126,6 @@ class MergoService : AccessibilityService() {
             brain = MergoAi.brain(voice, settings), voice = voice, overlay = overlay, settings = settings,
             familyLog = FamilyLog(File(filesDir, "family_log.json")),
             liveVolume = { device.volume() }, liveOnline = { device.isOnline() },
-            grace = NoGraceListener(),
         )
         // 서비스가 앱 사용 도중에 (재)시작돼도 지금 앱을 알도록 활성 창에서 읽어 둔다.
         foreground = screen.currentPackage()?.takeIf { it !in ignored }
@@ -269,9 +267,8 @@ class MergoService : AccessibilityService() {
     }
 
     /**
-     * 디버그 빌드 전용: 음성 엔진 없이 '들은 문장'을 넣어 유예 듣기·도와줘 흐름을 시험한다.
-     * `adb shell am broadcast -a app.mergo.DEBUG_HEAR --es text "잘못 눌렀다" -p app.mergo`
-     * `adb shell am broadcast -a app.mergo.DEBUG_HEAR --es text "소리가 안 나" --ez help true -p app.mergo`
+     * 디버그 빌드 전용: 음성 엔진 없이 호출어 뒤에 '들은 문장'을 넣어 도와줘 흐름을 시험한다.
+     * `adb shell am broadcast -a app.mergo.DEBUG_HEAR --es text "소리가 안 나" -p app.mergo`
      */
     private fun registerDebugHear() {
         val rc = object : BroadcastReceiver() {
@@ -283,7 +280,7 @@ class MergoService : AccessibilityService() {
                 val text = intent.getStringExtra("text") ?: return
                 log("디버그 듣기: $text")
                 scope.launch {
-                    if (intent.getBooleanExtra("help", false)) controller.onHelp(text) else controller.onGraceHeard(text)
+                    controller.onHelp(text)
                 }
             }
         }
