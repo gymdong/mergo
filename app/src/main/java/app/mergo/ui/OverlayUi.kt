@@ -49,14 +49,14 @@ class OverlayUi(
     fun showHelpButton() {
         if (helpButton != null) return
         val b = Button(service).apply {
-            text = "✦  도와줘"
+            text = "도와줘"
             isAllCaps = false
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
             background = round(GREEN, dp(32).toFloat())
             elevation = dp(6).toFloat()
-            setPadding(dp(24), 0, dp(24), 0)
+            setPadding(dp(22), 0, dp(22), 0)
             setOnClickListener { onHelp() }
             contentDescription = "머고 도와줘 버튼"
         }
