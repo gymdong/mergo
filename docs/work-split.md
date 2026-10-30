@@ -19,51 +19,19 @@
 ## 0단계 · 함께 (첫 45분) — 계약 확정과 뼈대
 
 1. **A**: Gradle 프로젝트 뼈대를 만든다(Wrapper, `app` 모듈, minSdk 29, target 36, `local.properties`는 gitignore). `main`에 push한다.
-2. **둘이 같이**: `model/` 패키지의 아래 계약을 그대로 만들어 커밋한다. 이후에는 **각자 Fake 구현으로 개발**한다.
+2. **계약 (확정, `feat/device`에서 작성)**: `app/src/main/java/app/mergo/model/`가 기준이다. 아래는 요약이며, 이후 변경은 반드시 상대에게 알린다.
 
-```kotlin
-// model/Events.kt — A가 채우고 B가 읽음
-data class ScreenEvent(val ts: Long, val pkg: String, val title: String?,
-                       val texts: List<String>, val userAction: Boolean, val kind: EventKind)
-enum class EventKind { WINDOW_CHANGED, CONTENT_CHANGED, CLICK, SCROLL, KEY, BACK }
-data class NodeSnapshot(val id: Int, val text: String?, val desc: String?,
-                        val clickable: Boolean, val bounds: Rect4, val visible: Boolean)
-data class Rect4(val l: Int, val t: Int, val r: Int, val b: Int)
-data class Baseline(val pkg: String, val mediaTitle: String?, val volume: Int,
-                    val online: Boolean, val updatedAt: Long)
+| 파일 | 내용 | 구현 | 사용 |
+|---|---|---|---|
+| `Events.kt` | `ScreenEvent`(+`markers`), `EventKind`(+`TOUCH`), `Marker`(카운트다운·건너뛰기·광고·플레이어), `NodeSnapshot`(+`viewId`), `Rect4`, `Baseline` | A | A·B |
+| `Recipes.kt` | `Recipe`, `RecipeIds`(restore_video, set_volume, open_previous_app, open_internet_panel, skip_ad, screen_agent, ask) | A | B(Brain이 id 선택) |
+| `Brain.kt` | `BrainContext`, `BrainDecision`, `Brain` | **B** | A(Controller) |
+| `Voice.kt` | `VoiceIO`(speak, listen, listenYesNo, cancelListening), `YesNo` | **B** | A |
+| `Screen.kt` | `ScreenReader`(nodes, click, tap, back, currentPackage), `ScreenAgent`(achieve) | ScreenReader=A, **ScreenAgent=B** | B / A |
+| `Settings.kt` | `SettingsSource`(autoExecute, wakeWord) | **B** | A |
+| `Clock.kt` | 시간 주입 | - | A·B |
 
-// model/Recipes.kt — A가 구현, B의 Brain이 id로 고름
-interface Recipe { val id: String; suspend fun run(params: Map<String, String>): Boolean }
-// id: restore_video, set_volume, open_previous_app, open_internet_panel, skip_ad, screen_agent, ask
-
-// model/Brain.kt — B가 구현, A의 Orchestrator가 호출
-data class BrainContext(val utterance: String?, val diff: List<String>, val timeline: List<String>,
-                        val current: Baseline, val screenHasAd: Boolean)
-data class BrainDecision(val diagnosis: String, val recipe: String,
-                         val params: Map<String, String>, val say: String, val confirm: Boolean)
-interface Brain { suspend fun decide(ctx: BrainContext): BrainDecision }
-
-// model/Voice.kt — B가 구현, A의 OverlayUi/Orchestrator가 호출
-enum class YesNo { YES, NO, NONE }
-interface VoiceIO {
-    suspend fun speak(text: String)
-    suspend fun listen(timeoutMs: Long = 5000): String?        // 자유 발화
-    suspend fun listenYesNo(timeoutMs: Long = 5000): YesNo      // 긍정/부정어 판정
-}
-
-// model/Screen.kt — A가 구현(접근성), B의 ScreenAgent가 호출
-interface ScreenReader {
-    fun nodes(): List<NodeSnapshot>        // 보이는 노드, 번호 부여
-    fun click(nodeId: Int): Boolean        // 실패하면 bounds 중심 탭 제스처
-    fun back(): Boolean
-}
-
-// model/Agent.kt — B가 구현, A의 레시피 체인 마지막 단계에서 호출
-interface ScreenAgent { suspend fun achieve(goal: String): Boolean }
-
-// model/Clock.kt — 둘 다 사용 (JVM 테스트용)
-fun interface Clock { fun now(): Long }
-```
+**B가 교체할 곳:** `service/MergoService.kt`의 조립부에서 `ChoiceBrain`, `SilentVoice`, `NoAgent`, `DefaultSettings`(모두 `core/fakes/`)를 진짜 구현으로 바꾼다. `ScreenAgent`에는 `AccessibilityScreen`(ScreenReader 구현)을 넘기면 된다.
 
 3. **연결 지점(Orchestrator, A 소유)**: `core/MergoController`가 아래 두 흐름을 맡는다. B의 `Brain`·`VoiceIO`·`ScreenAgent`는 생성자로 주입받는다.
    - 감지 흐름: `StuckDetector`의 제안 → 말풍선과 `VoiceIO.listenYesNo` → 레시피 체인 → `Verifier` → 실패하면 FamilyLog
@@ -80,7 +48,7 @@ fun interface Clock { fun now(): Long }
 | `TimelineBuffer`: 10분 원형 버퍼, 중복 제거, 디버그용 JSON 덤프 | `Brain` 키워드 규칙(순수 함수, 사투리 포함) + **발화 테스트셋 38개**(AC-B5) |
 | `BaselineStore`: 5초 유지·영상 30초 시청 기준, 스택 3개(AC-D7) | `LlmClient` 인터페이스, `GeminiClient`(기본), `ClaudeClient`(교체용), 타임아웃 8초, "잠시만요" 1.5초 |
 | `StuckDetector` R1(카운트다운 우선 + 대체 모드)(AC-D1, D2) | 응답 파서: 코드펜스, 깨진 JSON → 키워드/ask로 대체(AC-B6) |
-| `OverlayUi`: 도와줘 버튼(64dp+), 말풍선 [네]/[아니요](18sp+) | `FakeBrain`·`FakeVoiceIO`를 먼저 A에게 넘김(1단계 시작 30분 안) |
+| `OverlayUi`: 도와줘 버튼(64dp+), 말풍선 [네]/[아니요](18sp+) | (A가 `core/fakes/`에 가짜 구현을 이미 만들어 둠 — B는 진짜 구현에 집중) |
 | `ScreenReader` 구현(노드 스냅샷, 클릭, 탭 제스처) — **B의 ScreenAgent가 쓰므로 1단계 안에 넘김** | |
 | `RestoreVideo`(S1 순서: 이전 버튼 → 기록 → 에이전트), `Verifier` | |
 | `MergoController`: 감지 흐름 연결 | |
@@ -133,3 +101,42 @@ fun interface Clock { fun now(): Long }
 
 - **A:** "`docs/mergo-mvp-spec.md`의 §1~§3과 `docs/work-split.md`의 A 열을 구현해. `model/` 계약은 바꾸지 말고, Brain/VoiceIO/ScreenAgent는 Fake를 써. 감지 로직은 안드로이드 타입 없이 순수 Kotlin으로 만들고 Clock 주입으로 JVM 테스트를 붙여."
 - **B:** "`docs/mergo-mvp-spec.md`의 §4~§5와 `docs/work-split.md`의 B 열을 구현해. `model/` 계약은 바꾸지 말고, ScreenReader는 Fake를 써. Brain 키워드 규칙과 LLM 파서, Agent 안전 검사는 순수 Kotlin으로 만들고 JVM 테스트를 붙여."
+
+## 진행 현황
+
+| 날짜 | 브랜치 | 내용 |
+|---|---|---|
+| 2026-10-30 | `feat/device` | 0단계 뼈대·계약, A 1단계(서비스·기록·정상 상태·R1~R4·오버레이·RestoreVideo·Verifier·Controller) + SetVolume·OpenPreviousApp·SkipAd·실패 기록. 코드 리뷰 반영, `mergo_UI.pdf` 시안 톤의 오버레이(막힘 감지 시트·도와줘 패널·복구 중/완료 카드·이 화면이 맞나요?)와 설정 화면. JVM 테스트 59개 통과, `assembleDebug` 성공 |
+| 2026-10-30 | `feat/device` | 에뮬레이터(API 36) 검증과 그 결과 반영. JVM 테스트 65개 통과. 아래 "에뮬레이터 검증 결과" 참고 |
+
+## 사전 검증 방법 (A)
+
+1. `./gradlew installDebug` → 앱의 설정 화면에서 접근성, 알림 접근, 마이크 권한을 켠다.
+2. YouTube에서 확인하려는 화면(재생 중, 컨트롤 표시, 카운트다운, 광고)을 띄우고 **도와줘 버튼을 길게 누른다** → 노드 목록과 최근 기록이 저장된다.
+3. `adb pull /sdcard/Android/data/app.mergo/files/ ./dumps/`로 가져와 `service/YouTubeSignals.kt`의 패턴을 보정한다. 카운트다운이 끝내 잡히지 않으면 `DetectorConfig.requireCountdown = false`로 바꾼다.
+4. 로그: `adb logcat -s Mergo:*`
+5. **뒤로 가기 확인(R3):** API 36 제스처 내비게이션에서는 뒤로 가기가 `KEYCODE_BACK`으로 안 올 수 있다. 로그에 BACK이 안 찍히면 에뮬레이터를 3버튼 내비게이션으로 바꿔 시연한다(설정 → 시스템 → 탐색 모드).
+
+## 에뮬레이터 검증 결과 (2026-10-30, `Medium_Phone_API_36.1`, YouTube 영어 UI)
+
+| 항목 | 결과 | 비고 |
+|---|---|---|
+| 서비스 시작·도와줘 버튼·선택지 패널 | ✅ | 시안 톤으로 표시 |
+| S4 소리 복원 (도와줘 → 소리가 안 나) | ✅ | 복구 8~39ms |
+| S1 자동재생 감지 → 제안 → 이전 동영상 버튼 복원 | ✅ | 카운트다운 신호 관측, 자동재생 10초 뒤 제안, 복원 1.26초 |
+| S3 홈 이탈 20초 → 제안 → YouTube 복귀 | ✅ | 복원 0.66초 |
+| N1 직접 다음 영상 고르고 계속 시청 | ✅ | 제안 0회 |
+| 영상 제목 | ✅ MediaSession | 노드 대안: 플레이어 바로 아래 첫 글자 (viewId 없음) |
+| 이전 동영상 버튼 | ✅ | `player_control_previous_button`, desc "Previous video" |
+| **시청 기록에서 복원** | ⚠️ 미검증 | 기록 링크는 열리나 이 에뮬레이터는 Google 로그인이 깨져 목록이 안 보임. **로그인된 기기에서 확인 필요** |
+| **뒤로 가기 연타(R3)** | ⚠️ 미검증 | adb 가상 키는 접근성 키 필터를 거치지 않아 확인 불가. 실기기·3버튼 내비게이션에서 확인 필요 |
+| S11 광고 건너뛰기 | ⚠️ 미검증 | 검증 중 건너뛰기 광고가 나오지 않음 |
+
+검증하며 고친 것:
+- **판정 기준:** YouTube 플레이어 탭은 클릭 이벤트가 오지 않는다. 그래서 '카운트다운이 있으면 자동재생, 없으면 사용자 선택'으로 판정한다.
+- **자동 스크롤 무시:** YouTube가 새 영상에 맞춰 목록을 스스로 스크롤하는데, 제목 변경 직후 3초 안의 SCROLL은 사용자 동작에서 뺀다.
+- **복구 직후:** 5초 동안 제목 변화를 분류하지 않는다. 늦게 들어온 제목이 오조작으로 잘못 읽혔다.
+- **플레이어 노드:** `watch_player`만 쓴다. 화면 전체 컨테이너를 플레이어로 오인해 댓글 창을 연 문제를 고쳤다.
+- **시청 기록 정리:** 실패 후 정리는 기록 화면이 실제로 열렸을 때만 뒤로 간다. 영상 화면을 닫아 버린 문제를 고쳤다.
+- **광고 판정:** 광고·건너뛰기는 플레이어 영역 안의 노드만 본다. 추천 목록의 'Sponsored' 카드와 제목에 'Skip'이 든 영상을 오인하지 않는다.
+- **볼륨:** 머고가 바꾼 게 아니면 볼륨 변화를 사용자 동작으로 본다(가상 키 미수신 대응). 볼륨 변화는 시스템 방송으로도 받는다.

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">머고</string>
+    <string name="service_label">머고 도우미</string>
+    <string name="service_description">화면이 막혔을 때 원래 보던 화면으로 되돌려 드립니다. 화면 글자는 이 기기 안에만 10분 동안 보관합니다.</string>
+    <string name="media_listener_label">머고 영상 제목 읽기</string>
+</resources>
