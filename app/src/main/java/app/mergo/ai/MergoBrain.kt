@@ -25,7 +25,7 @@ class MergoBrain(
         if (match.outOfScope) return outOfScope()
         match.candidates.singleOrNull()?.let { return decisionFor(it, ctx) }
 
-        val fromLlm = askLlm(ctx)?.let { guard(it, ctx, match) }
+        val fromLlm = askLlm(ctx)?.let { guard(it, ctx, match) }?.let { fitToScreen(it, ctx) }
         log("brain llm decision=$fromLlm")
         if (fromLlm != null && fromLlm.recipe != RecipeIds.ASK) {
             return fromLlm.copy(confirm = !autoExecute())
@@ -58,6 +58,13 @@ class MergoBrain(
     private fun guard(decision: BrainDecision, ctx: BrainContext, match: KeywordMatch): BrainDecision {
         val noEvidence = match.candidates.isEmpty() && ctx.diff.isEmpty() && !match.hasTroubleSignal
         return if (noEvidence) outOfScope() else decision
+    }
+
+    /** 건너뛰기는 YouTube 광고 전용이다. 다른 앱의 광고는 화면을 보고 닫아야 한다. */
+    private fun fitToScreen(decision: BrainDecision, ctx: BrainContext): BrainDecision {
+        val otherApp = ctx.current.pkg != KeywordRules.YOUTUBE && !ctx.screenHasAd
+        if (decision.recipe != RecipeIds.SKIP_AD || !otherApp) return decision
+        return decision.copy(recipe = RecipeIds.SCREEN_AGENT, params = mapOf("goal" to "광고 닫기"))
     }
 
     /** F9: 가능성이 높은 후보부터 예/아니오로 최대 2번 묻는다. */

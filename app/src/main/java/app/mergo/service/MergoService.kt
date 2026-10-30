@@ -20,6 +20,8 @@ import android.view.inputmethod.InputMethodManager
 import app.mergo.BuildConfig
 import app.mergo.ai.AndroidVoiceIO
 import app.mergo.ai.MergoAi
+import app.mergo.ai.WakeListener
+import app.mergo.ai.WakeOptions
 import app.mergo.core.MergoController
 import app.mergo.core.fakes.NoGraceListener
 import app.mergo.detect.Cooldown
@@ -50,7 +52,7 @@ import java.io.File
 
 /**
  * 머고의 접근성 서비스. 이벤트를 텍스트 기록으로 바꿔 감지기에 넣고, 레시피가 화면을 조작하는 창구가 된다.
- * 부품 조립도 여기서 한다. 유예 듣기(Vosk)만 아직 가짜 구현을 쓴다.
+ * 부품 조립도 여기서 한다. 유예 듣기는 호출어로 대체해서 쓰지 않는다.
  */
 class MergoService : AccessibilityService() {
     private val scope = MainScope()
@@ -62,6 +64,7 @@ class MergoService : AccessibilityService() {
     private lateinit var media: MediaTitleSource
     private lateinit var overlay: OverlayUi
     private lateinit var voice: AndroidVoiceIO
+    private var wake: WakeListener? = null
     private lateinit var timeline: TimelineBuffer
     private lateinit var controller: MergoController
 
@@ -107,7 +110,10 @@ class MergoService : AccessibilityService() {
         )
         val detector = StuckDetector(clock, config, cooldown) { baseline.current?.mediaTitle }
         val settings = MergoSettings(this)
-        voice = AndroidVoiceIO(this)
+        wake = MergoAi.speechToText()?.let { speech ->
+            WakeListener(this, settings, speech, ::log) { command -> scope.launch { controller.onHelp(command) } }
+        }
+        voice = AndroidVoiceIO(this) { busy -> wake?.micBusy(busy) }
         val agent: ScreenAgent = MergoAi.screenAgent(screen, voice)
         val currentTitle = { currentVideoTitle() }
         val recipes: Map<String, Recipe> = listOf(
@@ -132,6 +138,7 @@ class MergoService : AccessibilityService() {
         // 서비스가 앱 사용 도중에 (재)시작돼도 지금 앱을 알도록 활성 창에서 읽어 둔다.
         foreground = screen.currentPackage()?.takeIf { it !in ignored }
         overlay.showHelpButton()
+        wake?.start()
         watchDeviceState()
         if (BuildConfig.DEBUG) registerDebugHear()
         controller.onDeviceState(device.volume(), device.isOnline(), userAction = false)
@@ -202,6 +209,7 @@ class MergoService : AccessibilityService() {
     override fun onDestroy() {
         if (::overlay.isInitialized) overlay.removeAll()
         if (::voice.isInitialized) voice.close()
+        wake?.shutdown()
         volumeObserver?.let { contentResolver.unregisterContentObserver(it) }
         volumeReceiver?.let { runCatching { unregisterReceiver(it) } }
         debugReceiver?.let { runCatching { unregisterReceiver(it) } }
@@ -280,6 +288,17 @@ class MergoService : AccessibilityService() {
                     dumpForDebug()
                     return
                 }
+                if (intent.action == DEBUG_REPLAY) {
+                    val name = intent.getStringExtra("name") ?: return
+                    wake?.replay(File(getExternalFilesDir(null), name))
+                    return
+                }
+                if (intent.action == DEBUG_WAKE) {
+                    val options = WakeOptions.without(intent.getStringExtra("off"))
+                    wake?.options = options
+                    log("호출어 옵션: $options")
+                    return
+                }
                 val text = intent.getStringExtra("text") ?: return
                 log("디버그 듣기: $text")
                 scope.launch {
@@ -287,7 +306,11 @@ class MergoService : AccessibilityService() {
                 }
             }
         }
-        registerReceiver(rc, IntentFilter(DEBUG_HEAR).apply { addAction(DEBUG_DUMP) }, Context.RECEIVER_EXPORTED)
+        registerReceiver(rc, IntentFilter(DEBUG_HEAR).apply {
+            addAction(DEBUG_DUMP)
+            addAction(DEBUG_WAKE)
+            addAction(DEBUG_REPLAY)
+        }, Context.RECEIVER_EXPORTED)
         debugReceiver = rc
     }
 
@@ -309,6 +332,10 @@ class MergoService : AccessibilityService() {
         const val DEBUG_HEAR = "app.mergo.DEBUG_HEAR"
         /** 디버그: 화면을 건드리지 않고 노드·기록 덤프. `adb shell am broadcast -a app.mergo.DEBUG_DUMP -p app.mergo` */
         const val DEBUG_DUMP = "app.mergo.DEBUG_DUMP"
+        /** 디버그: 호출어 듣기 방법을 끈다. `--es off "second,trim,end,warm"` */
+        const val DEBUG_WAKE = "app.mergo.DEBUG_WAKE"
+        /** 디버그: 앱 외부 저장소의 16kHz WAV를 마이크 대신 듣는다. `--es name "voice.wav"` */
+        const val DEBUG_REPLAY = "app.mergo.DEBUG_REPLAY"
         val USER_KINDS = setOf(EventKind.CLICK, EventKind.SCROLL, EventKind.TOUCH, EventKind.KEY, EventKind.BACK)
     }
 }

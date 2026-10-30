@@ -51,6 +51,12 @@ internal object LlmHttp {
         .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
         .build()
 
+    /** 호출어 받아쓰기는 연결을 미리 열어 둔다. 끊긴 연결에 묶이지 않도록 살아 있는지 계속 확인한다. */
+    val reusableClient: OkHttpClient = OkHttpClient.Builder()
+        .callTimeout(TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        .pingInterval(5, TimeUnit.SECONDS)
+        .build()
+
     fun jsonBody(json: String): RequestBody = json.toRequestBody(JSON)
 
     suspend fun send(http: OkHttpClient, request: Request): String =
