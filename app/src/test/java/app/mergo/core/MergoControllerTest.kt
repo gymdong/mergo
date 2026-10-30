@@ -146,6 +146,7 @@ class MergoControllerTest {
         assertTrue(!log.resolved && !log.notified)
         assertEquals("guided", log.outcome)
         assertEquals("광고가 끝나면 이어서 나와요", log.summary)
+        assertEquals("안내 문장은 컨트롤러가 한 번 말한다", 1, env.voice.spoken.count { it == "광고가 끝나면 이어서 나와요" })
     }
 
     @Test

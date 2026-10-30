@@ -16,6 +16,8 @@ data class KeywordMatch(
     val candidates: List<String>,
     val outOfScope: Boolean,
     val hasTroubleSignal: Boolean,
+    /** 소리가 안 난다는데 볼륨은 켜져 있고 줄어들지도 않았다. 볼륨을 되돌려도 달라지는 게 없다. */
+    val soundButAudible: Boolean = false,
 )
 
 /** 서버 없이 도는 순수 함수 규칙. 후보가 하나면 Brain이 LLM 없이 바로 레시피를 고른다. */
@@ -53,7 +55,9 @@ object KeywordRules {
 
         val videoDiff = ctx.diff.any { it.startsWith(DiffPrefix.VIDEO) }
         val appDiff = ctx.diff.any { it.startsWith(DiffPrefix.APP) }
+        val volumeDiff = ctx.diff.any { it.startsWith(DiffPrefix.VOLUME) }
         val found = LinkedHashSet<String>()
+        var soundButAudible = false
 
         fun hasAny(words: List<String>) = words.any { it in text }
 
@@ -63,7 +67,9 @@ object KeywordRules {
             hasAny(CLOSE) ->
                 found += if (ctx.screenHasAd) RecipeIds.SKIP_AD else RecipeIds.SCREEN_AGENT
         }
-        if (hasAny(SOUND)) found += RecipeIds.SET_VOLUME
+        if (hasAny(SOUND)) {
+            if (ctx.current.volume == 0 || volumeDiff) found += RecipeIds.SET_VOLUME else soundButAudible = true
+        }
         if (hasAny(NETWORK) || (!ctx.current.online && hasAny(NOT_SHOWING))) {
             found += RecipeIds.OPEN_INTERNET_PANEL
         }
@@ -81,7 +87,7 @@ object KeywordRules {
         }
         if (found.isEmpty() && (text.isEmpty() || hasAny(VAGUE))) found += fromDiff(ctx.diff)
 
-        return KeywordMatch(found.toList(), false, trouble)
+        return KeywordMatch(found.toList(), false, trouble, soundButAudible)
     }
 
     /** 이름으로 열어 달라는 앱. 앱 이름과 [OPEN] 말이 함께 있을 때만. [text]는 [normalize]한 발화. */

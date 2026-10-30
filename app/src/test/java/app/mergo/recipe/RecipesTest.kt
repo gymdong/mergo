@@ -141,6 +141,13 @@ class RecipesTest {
     }
 
     @Test
+    fun `S4 이미 그 볼륨이면 고쳤다고 하지 않고 다른 원인을 안내한다`() = runTest {
+        val store = BaselineStore(Clock { 0 }, emptySet())
+        val device = FakeDevice().apply { vol = 7; max = 15 }
+        assertEquals(RecipeOutcome.Guided(SOUND_IS_ON), SetVolume(device, store).run(emptyMap()))
+    }
+
+    @Test
     fun `S4 기록이 전혀 없으면 최대의 절반으로 켠다`() = runTest {
         val store = BaselineStore(Clock { 0 }, emptySet())
         val device = FakeDevice().apply { vol = 0; max = 15 }
@@ -241,6 +248,6 @@ class RecipesTest {
         val voice = FakeVoice()
         assertEquals(RecipeOutcome.Guided("광고가 끝나면 이어서 나와요"), SkipAd(screen, voice).run(emptyMap()))
         assertTrue(screen.clicks.isEmpty())
-        assertEquals("광고가 끝나면 이어서 나와요", voice.spoken.last())
+        assertEquals("마지막 안내는 컨트롤러가 말한다", listOf("잠시만요, 곧 넘길 수 있어요"), voice.spoken)
     }
 }

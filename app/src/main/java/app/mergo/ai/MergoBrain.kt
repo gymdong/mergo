@@ -7,6 +7,7 @@ import app.mergo.model.KnownApps
 import app.mergo.model.RecipeIds
 import app.mergo.model.VoiceIO
 import app.mergo.model.YesNo
+import app.mergo.recipe.SOUND_IS_ON
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -24,6 +25,7 @@ class MergoBrain(
         val match = KeywordRules.match(ctx)
         log("brain keyword candidates=${match.candidates} outOfScope=${match.outOfScope}")
         if (match.outOfScope) return outOfScope()
+        if (match.soundButAudible && match.candidates.isEmpty()) return soundIsOn()
         match.candidates.singleOrNull()?.let { return decisionFor(it, ctx) }
 
         val fromLlm = askLlm(ctx)?.let { guard(it, ctx, match) }
@@ -60,6 +62,9 @@ class MergoBrain(
         val noEvidence = match.candidates.isEmpty() && ctx.diff.isEmpty() && !match.hasTroubleSignal
         if (noEvidence) return outOfScope()
         if (decision.recipe == RecipeIds.OPEN_PREVIOUS_APP) return guardOpenApp(decision)
+        // 볼륨이 켜져 있고 줄어들지도 않았으면 볼륨을 '되돌려도' 아무것도 바뀌지 않는다. 고친 척하지 않는다.
+        val volumeUnchanged = ctx.diff.none { it.startsWith(DiffPrefix.VOLUME) }
+        if (decision.recipe == RecipeIds.SET_VOLUME && ctx.current.volume > 0 && volumeUnchanged) return soundIsOn()
         return decision
     }
 
@@ -129,6 +134,14 @@ class MergoBrain(
         recipe = RecipeIds.ASK,
         params = emptyMap(),
         say = "그건 제가 해 드리기 어려워요. 화면에 문제가 있으신가요?",
+        confirm = false,
+    )
+
+    private fun soundIsOn() = BrainDecision(
+        diagnosis = "볼륨은 켜져 있음",
+        recipe = RecipeIds.ASK,
+        params = emptyMap(),
+        say = SOUND_IS_ON,
         confirm = false,
     )
 

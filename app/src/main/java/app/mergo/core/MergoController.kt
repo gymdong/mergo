@@ -216,8 +216,11 @@ class MergoController(
                 // 머고는 맞다고 확인했는데 사용자는 아니라고 했다. 목표 자체를 잘못 골랐다는 신호라 따로 남긴다.
                 label = "verified_rejected"
             }
-            // 레시피가 이미 안내했다. 해결도 실패도 아니므로 가족 알림을 묻지 않는다.
-            is RecipeOutcome.Guided -> return record(resolved = false, summary = outcome.said)
+            // 해결도 실패도 아니므로 가족 알림을 묻지 않는다. 안내 문장은 여기서 한 번만 말한다.
+            is RecipeOutcome.Guided -> {
+                voice.speak(outcome.said)
+                return record(resolved = false, summary = outcome.said)
+            }
             is RecipeOutcome.Unverifiable -> {
                 // 머고가 결과를 확인하지 못했으니 '다 됐어요'라고 하지 않는다. 사용자가 "예"라고 해야만 해결로 기록하고, 무응답은 미확인으로 둔다.
                 // 확인 없이 실행 모드에서는 물을 수 없으니 미확인으로만 남긴다.

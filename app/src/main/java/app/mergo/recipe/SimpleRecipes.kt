@@ -11,7 +11,10 @@ import app.mergo.model.VoiceIO
 import app.mergo.service.YouTubeSignals
 import kotlinx.coroutines.delay
 
-/** S4: 정상 상태의 볼륨으로 되돌린다. 정상 상태가 0이면 마지막으로 소리가 나던 볼륨, 그것도 없으면 최대의 절반. */
+/**
+ * S4: 정상 상태의 볼륨으로 되돌린다. 정상 상태가 0이면 마지막으로 소리가 나던 볼륨, 그것도 없으면 최대의 절반.
+ * 이미 그 볼륨이면 바꿀 게 없으니 고쳤다고 하지 않고 다른 원인을 안내한다([RecipeOutcome.Guided]).
+ */
 class SetVolume(private val device: DeviceActions, private val baseline: BaselineStore) : Recipe {
     override val id = RecipeIds.SET_VOLUME
 
@@ -22,6 +25,7 @@ class SetVolume(private val device: DeviceActions, private val baseline: Baselin
 
     override suspend fun run(params: Map<String, String>): RecipeOutcome {
         val target = params["volume"]?.toIntOrNull()?.takeIf { it > 0 } ?: target()
+        if (device.volume() == target) return RecipeOutcome.Guided(SOUND_IS_ON)
         return StepChain.run(
             id,
             listOf(Step("set_stream_music", { device.setVolume(target); true }, {
@@ -58,6 +62,9 @@ class OpenPreviousApp(private val device: DeviceActions, private val baseline: B
     private fun launch(pkg: String) =
         Step("launch:$pkg", { device.launchApp(pkg) }, { Verifier.waitFor(4_000) { device.foregroundPkg()?.let { it == pkg } } })
 }
+
+/** 볼륨이 이미 켜져 있을 때의 안내. 출력 장치·재생 상태는 아직 읽지 못해 둘 다 말한다. */
+const val SOUND_IS_ON = "소리는 켜져 있어요. 영상이 멈췄는지, 이어폰이 연결됐는지 봐 주세요."
 
 /**
  * S11: 광고 건너뛰기 버튼을 누른다. 버튼이 아직 없으면 최대 10초 기다린다.
@@ -97,8 +104,6 @@ class SkipAd(
             delay(pollMs)
             waited += pollMs
         }
-        val said = "광고가 끝나면 이어서 나와요"
-        voice.speak(said)
-        return RecipeOutcome.Guided(said)
+        return RecipeOutcome.Guided("광고가 끝나면 이어서 나와요")
     }
 }
