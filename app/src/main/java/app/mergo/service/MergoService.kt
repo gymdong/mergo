@@ -20,8 +20,8 @@ import android.view.inputmethod.InputMethodManager
 import app.mergo.BuildConfig
 import app.mergo.ai.AndroidVoiceIO
 import app.mergo.ai.MergoAi
+import app.mergo.core.LiveScreen
 import app.mergo.core.MergoController
-import app.mergo.core.fakes.NoGraceListener
 import app.mergo.detect.Cooldown
 import app.mergo.detect.DetectorConfig
 import app.mergo.detect.StuckDetector
@@ -30,11 +30,14 @@ import app.mergo.memory.FamilyLog
 import app.mergo.memory.TimelineBuffer
 import app.mergo.model.Clock
 import app.mergo.model.EventKind
+import app.mergo.model.FailReason
 import app.mergo.model.Marker
 import app.mergo.model.Recipe
 import app.mergo.model.RecipeIds
+import app.mergo.model.RecipeOutcome
 import app.mergo.model.ScreenAgent
 import app.mergo.model.ScreenEvent
+import app.mergo.recipe.OpenInternetPanel
 import app.mergo.recipe.OpenPreviousApp
 import app.mergo.recipe.RestoreVideo
 import app.mergo.recipe.SetVolume
@@ -67,6 +70,7 @@ class MergoService : AccessibilityService() {
 
     private var foreground: String? = null
     private var ignored: Set<String> = emptySet()
+    private var navBarPkgs: Set<String> = emptySet()
     private var lastKeyTs = 0L
     private var lastVolume = -1
     private var lastSnapshotTs = 0L
@@ -99,6 +103,7 @@ class MergoService : AccessibilityService() {
             ignoredPkgs = DetectorConfig().ignoredPkgs + imes + packageName,
         )
         ignored = config.ignoredPkgs
+        navBarPkgs = config.launcherPkgs + "com.android.systemui"
         log("시작: launchers=${config.launcherPkgs} ignored=${config.ignoredPkgs}")
 
         val cooldown = Cooldown()
@@ -113,21 +118,25 @@ class MergoService : AccessibilityService() {
         val recipes: Map<String, Recipe> = listOf(
             RestoreVideo(screen, device, currentTitle, agent),
             SetVolume(device, baseline),
-            OpenPreviousApp(device, baseline),
+            OpenPreviousApp(device, baseline, screen),
             SkipAd(screen, voice),
+            OpenInternetPanel(screen, device),
             object : Recipe {
                 override val id = RecipeIds.SCREEN_AGENT
-                override suspend fun run(params: Map<String, String>) = agent.achieve(params["goal"] ?: "화면 문제 해결")
+                // 에이전트의 '완료'는 LLM의 선언일 뿐이다. 목표별 검증 조건이 생기기 전까지는 검증 불가로 둔다.
+                override suspend fun run(params: Map<String, String>) =
+                    if (agent.achieve(params["goal"] ?: "화면 문제 해결")) RecipeOutcome.Unverifiable("에이전트 완료 선언만 있음")
+                    else RecipeOutcome.Failed(FailReason.AGENT_GAVE_UP)
             },
         ).associateBy { it.id }
 
-        overlay = OverlayUi(this, onHelp = { controller.launchHelp() }, onHelpLongPress = { dumpForDebug() })
+        overlay = OverlayUi(this, onHelp = { controller.launchHelp() })
         controller = MergoController(
             scope, clock, timeline, baseline, detector, cooldown, recipes,
             brain = MergoAi.brain(voice, settings), voice = voice, overlay = overlay, settings = settings,
             familyLog = FamilyLog(File(filesDir, "family_log.json")),
             liveVolume = { device.volume() }, liveOnline = { device.isOnline() },
-            grace = NoGraceListener(),
+            liveScreen = { LiveScreen(screen.currentPackage(), screen.nodes().flatMap { listOfNotNull(it.text, it.desc) }) },
         )
         // 서비스가 앱 사용 도중에 (재)시작돼도 지금 앱을 알도록 활성 창에서 읽어 둔다.
         foreground = screen.currentPackage()?.takeIf { it !in ignored }
@@ -148,6 +157,13 @@ class MergoService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         val pkg = event.packageName?.toString() ?: return
+        if (event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED && isNavBack(pkg, event)) {
+            // 3버튼 내비게이션의 뒤로 가기는 키 이벤트가 아니라 런처·시스템 UI의 클릭으로 온다(에뮬레이터 API 36 확인).
+            // 뒤로 가기는 지금 앞에 있는 앱에 대한 동작이라 그 앱의 BACK으로 넘긴다.
+            lastKeyTs = clock.now()
+            controller.onScreenEvent(ScreenEvent(lastKeyTs, foreground ?: UNKNOWN_PKG, null, emptyList(), true, EventKind.BACK))
+            return
+        }
         val kind = when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> EventKind.WINDOW_CHANGED
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> EventKind.CONTENT_CHANGED
@@ -181,6 +197,13 @@ class MergoService : AccessibilityService() {
         }
         val user = kind in USER_KINDS
         controller.onScreenEvent(ScreenEvent(now, pkg, title, texts, user, kind, markers))
+    }
+
+    /** 내비게이션 바의 뒤로 가기 단추. Pixel은 런처가, AOSP·삼성은 시스템 UI가 그리고 viewId는 둘 다 `:id/back`이다. */
+    private fun isNavBack(pkg: String, event: AccessibilityEvent): Boolean {
+        if (pkg !in navBarPkgs) return false
+        val id = runCatching { event.source?.viewIdResourceName }.getOrNull() ?: return false
+        return id.endsWith(":id/back")
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
@@ -269,9 +292,8 @@ class MergoService : AccessibilityService() {
     }
 
     /**
-     * 디버그 빌드 전용: 음성 엔진 없이 '들은 문장'을 넣어 유예 듣기·도와줘 흐름을 시험한다.
-     * `adb shell am broadcast -a app.mergo.DEBUG_HEAR --es text "잘못 눌렀다" -p app.mergo`
-     * `adb shell am broadcast -a app.mergo.DEBUG_HEAR --es text "소리가 안 나" --ez help true -p app.mergo`
+     * 디버그 빌드 전용: 음성 엔진 없이 호출어 뒤에 '들은 문장'을 넣어 도와줘 흐름을 시험한다.
+     * `adb shell am broadcast -a app.mergo.DEBUG_HEAR --es text "소리가 안 나" -p app.mergo`
      */
     private fun registerDebugHear() {
         val rc = object : BroadcastReceiver() {
@@ -283,7 +305,7 @@ class MergoService : AccessibilityService() {
                 val text = intent.getStringExtra("text") ?: return
                 log("디버그 듣기: $text")
                 scope.launch {
-                    if (intent.getBooleanExtra("help", false)) controller.onHelp(text) else controller.onGraceHeard(text)
+                    controller.onHelp(text)
                 }
             }
         }

@@ -43,7 +43,12 @@ class FakeDevice : DeviceActions {
     override fun volume() = vol
     override fun maxVolume() = max
     override fun setVolume(v: Int) { vol = v }
+    var wifiOn = true
+    val panels = mutableListOf<String>()
+    var onOpenPanel: () -> Unit = {}
     override fun isOnline() = online
+    override fun isWifiEnabled() = wifiOn
+    override fun openInternetPanel(): Boolean { panels += "internet"; onOpenPanel(); return true }
 }
 
 class FakeAgent(private val result: Boolean = false, private val onRun: () -> Unit = {}) : ScreenAgent {

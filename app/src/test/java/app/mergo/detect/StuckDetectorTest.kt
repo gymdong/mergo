@@ -46,7 +46,7 @@ class StuckDetectorTest {
     // AC-D2
     @Test
     fun `대체 모드에서는 카운트다운 없이 터치 부재만으로 R1 제안 1회`() {
-        val sim = Sim(DetectorConfig(launcherPkgs = setOf(LAUNCHER), requireCountdown = false))
+        val sim = Sim(DetectorConfig(launcherPkgs = setOf(LAUNCHER), requireCountdown = false, suggestAutoplay = true))
         sim.userPlays(0, "트로트 메들리", watchMs = 60_000)
         autoplay(sim, 70_000, "오늘의 뉴스", countdown = false)
         sim.playing(70_000, 120_000, "오늘의 뉴스")
@@ -83,6 +83,73 @@ class StuckDetectorTest {
         sim.userPlays(0, "짧게 본 영상", watchMs = 20_000)
         autoplay(sim, 28_000, "다른 영상", countdown = true)
         sim.playing(28_000, 60_000, "다른 영상")
+        assertTrue(sim.suggestions.isEmpty())
+    }
+
+    @Test
+    fun `S2 잘못 누른 뒤 여기저기 3번 연달아 누르면 R3 제안`() {
+        val sim = Sim()
+        sim.userPlays(0, "트로트 메들리", watchMs = 60_000)
+        sim.event(70_000, EventKind.CLICK)
+        sim.event(71_000, EventKind.CONTENT_CHANGED, title = "모르는 영상", markers = setOf(Marker.VIDEO_PLAYER))
+        sim.event(80_000, EventKind.CLICK)
+        sim.event(81_000, EventKind.CLICK)
+        sim.event(82_000, EventKind.CLICK)
+        sim.advanceTo(130_000)
+        assertEquals(listOf(RuleId.R3_MISTOUCH), sim.rules())
+    }
+
+    @Test
+    fun `일부러 고른 영상에서 가끔 누르는 건 연타가 아니다`() {
+        val sim = Sim()
+        sim.userPlays(0, "트로트 메들리", watchMs = 60_000)
+        sim.event(70_000, EventKind.CLICK)
+        sim.event(71_000, EventKind.CONTENT_CHANGED, title = "고른 영상", markers = setOf(Marker.VIDEO_PLAYER))
+        sim.event(80_000, EventKind.CLICK)
+        sim.event(85_000, EventKind.CLICK)
+        sim.event(90_000, EventKind.CLICK)
+        sim.advanceTo(130_000)
+        assertTrue(sim.suggestions.isEmpty())
+    }
+
+    @Test
+    fun `R5 유튜브에서 누른 직후 브라우저가 열려 5초 머물면 보던 화면으로 돌아갈지 묻는다`() {
+        val sim = Sim()
+        sim.userPlays(0, "트로트 메들리", watchMs = 40_000)
+        sim.event(50_000, EventKind.CLICK)
+        sim.event(50_500, EventKind.WINDOW_CHANGED, pkg = "com.android.chrome")
+        sim.advanceTo(60_000)
+        assertEquals(listOf(RuleId.R5_LINK_EXIT), sim.rules())
+        assertEquals(mapOf("pkg" to YT, "via" to "back"), sim.suggestions.single().params)
+    }
+
+    @Test
+    fun `R5 곧바로 유튜브로 돌아오면 묻지 않는다`() {
+        val sim = Sim()
+        sim.userPlays(0, "트로트 메들리", watchMs = 40_000)
+        sim.event(50_000, EventKind.CLICK)
+        sim.event(50_500, EventKind.WINDOW_CHANGED, pkg = "com.android.chrome")
+        sim.event(52_000, EventKind.WINDOW_CHANGED, pkg = YT)
+        sim.advanceTo(60_000)
+        assertTrue(sim.suggestions.isEmpty())
+    }
+
+    @Test
+    fun `R5 카톡에서 링크를 눌러 브라우저가 열린 건 일부러 연 것으로 본다`() {
+        val sim = Sim()
+        sim.event(10_000, EventKind.WINDOW_CHANGED, pkg = "com.kakao.talk")
+        sim.event(50_000, EventKind.CLICK, pkg = "com.kakao.talk")
+        sim.event(50_500, EventKind.WINDOW_CHANGED, pkg = "com.android.chrome")
+        sim.advanceTo(60_000)
+        assertTrue(sim.suggestions.isEmpty())
+    }
+
+    @Test
+    fun `R5 누르지 않았는데 브라우저가 뜬 건 오조작으로 보지 않는다`() {
+        val sim = Sim()
+        sim.userPlays(0, "트로트 메들리", watchMs = 40_000)
+        sim.event(50_500, EventKind.WINDOW_CHANGED, pkg = "com.android.chrome")
+        sim.advanceTo(60_000)
         assertTrue(sim.suggestions.isEmpty())
     }
 
@@ -193,6 +260,17 @@ class StuckDetectorTest {
         adVisible(sim, 50_000, 70_000)
         assertEquals(listOf(RuleId.R4_AD_SKIP), sim.rules())
         assertEquals(RecipeIds.SKIP_AD, sim.suggestions.single().recipeId)
+        assertEquals("기본은 묻지 않고 넘긴다", false, sim.suggestions.single().askFirst)
+    }
+
+    @Test
+    fun `기본 설정에서는 자동재생으로 넘어가도 되돌리기를 제안하지 않는다`() {
+        val sim = Sim(DetectorConfig(launcherPkgs = setOf(LAUNCHER)))
+        sim.userPlays(0, "트로트 메들리", watchMs = 40_000)
+        sim.event(50_000, EventKind.CONTENT_CHANGED, title = "트로트 메들리", markers = setOf(Marker.AUTOPLAY_COUNTDOWN))
+        sim.event(55_000, EventKind.CONTENT_CHANGED, title = "다른 영상")
+        sim.advanceTo(80_000)
+        assertTrue(sim.rules().isEmpty())
     }
 
     @Test
@@ -222,7 +300,7 @@ class StuckDetectorTest {
     // AC-D6
     @Test
     fun `거절한 규칙은 5분 동안 다른 대상에도 제안하지 않고 그 뒤에는 다시 제안한다`() {
-        val sim = Sim(DetectorConfig(launcherPkgs = setOf(LAUNCHER), requireCountdown = false))
+        val sim = Sim(DetectorConfig(launcherPkgs = setOf(LAUNCHER), requireCountdown = false, suggestAutoplay = true))
         sim.userPlays(0, "영상 가", watchMs = 60_000)
         autoplay(sim, 70_000, "영상 나", countdown = false)
         sim.advanceTo(81_000)

@@ -15,6 +15,7 @@ class FamilyLog(private val file: File?) {
         val notified: Boolean,            // 가족에게 알리기에 동의했나 (MVP는 실제 전송 없음)
         val resolved: Boolean = false,    // 머고가 해결했나 (리포트의 '자동 해결')
         val summary: String = "",         // 리포트에 보일 한 줄. 예: "소리를 다시 켰어요"
+        val outcome: String = "",         // 복구 결과 분류. verified·verified_noop·verified_rejected·guided·unverifiable·failed:사유 (예전 기록은 빈 값)
     )
 
     private val entries = mutableListOf<Entry>()
