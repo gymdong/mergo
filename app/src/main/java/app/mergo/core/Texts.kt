@@ -1,10 +1,18 @@
 package app.mergo.core
 
+import app.mergo.model.KnownApps
 import app.mergo.model.RecipeIds
 
 /** 복구 중·완료 안내와 가족 리포트에 남길 문구. 시안의 말투(존댓말, 짧게)를 따른다. */
 data class Texts(val progress: String, val done: String, val log: String, val failLog: String) {
     companion object {
+        /** 이름으로 앱을 열 때는 "보던 앱" 대신 그 앱 이름으로 말한다. */
+        fun of(recipeId: String, params: Map<String, String>): Texts {
+            val app = KnownApps.byId(params["app"])
+            if (recipeId != RecipeIds.OPEN_PREVIOUS_APP || app == null) return of(recipeId)
+            return Texts("${app.obj} 열고 있어요", "${app.obj} 열었어요", "${app.obj} 열었어요", "${app.obj} 열지 못했어요")
+        }
+
         fun of(recipeId: String): Texts = when (recipeId) {
             RecipeIds.RESTORE_VIDEO -> Texts("아까 보던 영상으로 돌아가고 있어요", "원래 영상으로 돌아왔어요", "이전 영상을 다시 찾았어요", "이전 영상을 찾지 못했어요")
             RecipeIds.SET_VOLUME -> Texts("소리를 다시 켜고 있어요", "소리를 다시 켰어요", "소리를 다시 켰어요", "소리를 켜지 못했어요")

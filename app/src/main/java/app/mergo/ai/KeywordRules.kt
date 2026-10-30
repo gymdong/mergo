@@ -1,6 +1,7 @@
 package app.mergo.ai
 
 import app.mergo.model.BrainContext
+import app.mergo.model.KnownApps
 import app.mergo.model.RecipeIds
 
 /** core/DiffBuilder가 만드는 diff 항목의 머리말. 예: "영상 제목: ○○ → △△ (터치 없음)" */
@@ -36,6 +37,11 @@ object KeywordRules {
     private val GONE = listOf("어디갔", "어데갔", "없어졌", "사라졌")
     private val BACK = listOf("아까", "보던", "이전영상", "돌아가", "되돌려", "아닌데", "아이다", "잘못눌")
     private val VAGUE = listOf("뭐고", "와이라", "왜이래", "이상", "잘못됐")
+    /**
+     * 앱 이름과 함께 나오면 그 앱을 열어 달라는 말로 본다. "유튜브 어디 갔어"처럼 사라진 경우는 [GONE]이 맡는다.
+     * "들어가니까 이상해" 같은 불평이 섞이지 않게 요청하는 꼴만 둔다.
+     */
+    private val OPEN = listOf("어딨", "어디있", "어디에있", "어데있", "열어", "켜줘", "켜주", "켜도", "켜봐", "틀어줘", "틀어주")
 
     fun normalize(text: String): String =
         text.lowercase().filter { it.isLetterOrDigit() }
@@ -61,6 +67,8 @@ object KeywordRules {
         if (hasAny(NETWORK) || (!ctx.current.online && hasAny(NOT_SHOWING))) {
             found += RecipeIds.OPEN_INTERNET_PANEL
         }
+        // "유튜브 아까 보던 거 틀어 줘"는 앱 열기가 아니라 영상 되돌리기다. 되돌리기·불평 말이 있으면 앱 열기로 보지 않는다.
+        if (found.isEmpty() && !hasAny(BACK) && !hasAny(VAGUE) && openApp(text) != null) found += RecipeIds.OPEN_PREVIOUS_APP
         if (hasAny(GONE)) {
             found += if (videoDiff && !appDiff) RecipeIds.RESTORE_VIDEO else RecipeIds.OPEN_PREVIOUS_APP
         } else if (found.isEmpty() && hasAny(BACK)) {
@@ -75,6 +83,9 @@ object KeywordRules {
 
         return KeywordMatch(found.toList(), false, trouble)
     }
+
+    /** 이름으로 열어 달라는 앱. 앱 이름과 [OPEN] 말이 함께 있을 때만. [text]는 [normalize]한 발화. */
+    fun openApp(text: String): KnownApps.App? = if (OPEN.any { it in text }) KnownApps.find(text) else null
 
     private fun fromDiff(diff: List<String>): List<String> = diff.mapNotNull {
         when {

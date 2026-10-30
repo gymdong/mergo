@@ -171,7 +171,7 @@ class MergoController(
     private suspend fun execute(recipeId: String, params: Map<String, String>, situation: String) {
         val recipe = recipes[recipeId]
         val started = clock.now()
-        val text = Texts.of(recipeId)
+        val text = Texts.of(recipeId, params)
         automating = true
         val outcome = try {
             overlay.progress(text.progress)

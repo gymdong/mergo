@@ -29,6 +29,71 @@ class MergoBrainTest {
     }
 
     @Test
+    fun `앱 이름과 열어 달라는 말이 있으면 LLM 없이 그 앱을 연다`() = runTest {
+        val llm = ScriptedLlm(replies = listOf(goodReply))
+        val brain = MergoBrain(llm, RecordingVoice())
+        val youtube = brain.decide(ctx("유튜브 어딨어"))
+        assertEquals(RecipeIds.OPEN_PREVIOUS_APP, youtube.recipe)
+        assertEquals(mapOf("app" to "youtube"), youtube.params)
+        assertEquals("유튜브를 열까요?", youtube.say)
+        assertEquals("kakaotalk", brain.decide(ctx("카톡 좀 열어 줘")).params["app"])
+        assertEquals(0, llm.calls)
+    }
+
+    @Test
+    fun `앱 이름만 있고 열어 달라는 말이 없으면 앱 열기로 보지 않는다`() = runTest {
+        val decision = MergoBrain(ScriptedLlm(), RecordingVoice()).decide(ctx("유튜브 소리가 안 나"))
+        assertEquals(RecipeIds.SET_VOLUME, decision.recipe)
+    }
+
+    @Test
+    fun `LLM이 앱 열기에 패키지를 넣으면 버린다`() = runTest {
+        val store = """{"diagnosis": "", "recipe": "open_previous_app", "params": {"pkg": "com.android.vending"}, "say": "열까요?"}"""
+        val decision = MergoBrain(ScriptedLlm(replies = listOf(store)), RecordingVoice())
+            .decide(ctx("그거 좀 열어 줘", listOf("기타: 변화")))
+        assertEquals(RecipeIds.OPEN_PREVIOUS_APP, decision.recipe)
+        assertTrue(decision.params.isEmpty())
+        assertEquals("직전 앱으로 돌아가는 정해진 문장", "아까 보시던 앱으로 돌아갈까요?", decision.say)
+    }
+
+    @Test
+    fun `앱 이름이 있어도 아까 보던 거를 찾으면 앱 열기가 아니라 되돌리기다`() = runTest {
+        val inYouTube = BrainContext(
+            "유튜브 아까 보던 거 틀어 줘", emptyList(), emptyList(),
+            Baseline("com.google.android.youtube", "뉴스", 8, true, 0), false,
+        )
+        assertEquals(RecipeIds.RESTORE_VIDEO, MergoBrain(ScriptedLlm(), RecordingVoice()).decide(inYouTube).recipe)
+    }
+
+    @Test
+    fun `앱 이름과 불평이 함께 있으면 앱을 열자고 하지 않는다`() = runTest {
+        assertTrue(RecipeIds.OPEN_PREVIOUS_APP !in KeywordRules.match(ctx("카톡 들어가니까 이상해")).candidates)
+    }
+
+    @Test
+    fun `존댓말로 켜 달라고 해도 앱을 연다`() = runTest {
+        assertEquals("youtube", MergoBrain(ScriptedLlm(), RecordingVoice()).decide(ctx("유튜브 켜 주세요")).params["app"])
+    }
+
+    @Test
+    fun `LLM이 목록에 없는 앱을 고르면 직전 앱을 열지 않고 못 한다고 말한다`() = runTest {
+        val toss = """{"diagnosis": "", "recipe": "open_previous_app", "params": {"app": "toss"}, "say": "토스를 열까요?"}"""
+        val decision = MergoBrain(ScriptedLlm(replies = listOf(toss)), RecordingVoice())
+            .decide(ctx("그거 좀 열어 줘", listOf("기타: 변화")))
+        assertEquals(RecipeIds.ASK, decision.recipe)
+        assertEquals("그 앱은 제가 열어 드리기 어려워요.", decision.say)
+    }
+
+    @Test
+    fun `LLM이 목록에 있는 앱을 고르면 정해진 문장으로 묻는다`() = runTest {
+        val kakao = """{"diagnosis": "", "recipe": "open_previous_app", "params": {"app": "kakaotalk"}, "say": "아무 말"}"""
+        val decision = MergoBrain(ScriptedLlm(replies = listOf(kakao)), RecordingVoice())
+            .decide(ctx("그거 좀 열어 줘", listOf("기타: 변화")))
+        assertEquals(mapOf("app" to "kakaotalk"), decision.params)
+        assertEquals("카카오톡을 열까요?", decision.say)
+    }
+
+    @Test
     fun `자동재생 복원에는 이전 영상 제목을 넘긴다`() = runTest {
         val decision = MergoBrain(ScriptedLlm(), RecordingVoice())
             .decide(ctx("아까 보던 거", listOf("영상 제목: ○○ 트로트 → △△ 뉴스 (터치 없음)")))

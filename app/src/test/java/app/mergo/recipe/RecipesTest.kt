@@ -157,6 +157,35 @@ class RecipesTest {
     }
 
     @Test
+    fun `이름으로 열 때는 기기에 있는 패키지를 앞에서부터 찾아 연다`() = runTest {
+        val device = FakeDevice().apply { fg = "launcher" }
+        val photosOnly = object : DeviceActions by device {
+            override fun launchApp(pkg: String) = pkg == "com.google.android.apps.photos" && device.launchApp(pkg)
+        }
+        val outcome = OpenPreviousApp(photosOnly, BaselineStore(Clock { 0 }, emptySet())).run(mapOf("app" to "gallery", "pkg" to yt))
+        assertEquals(RecipeOutcome.Verified(), outcome)
+        assertEquals("pkg보다 app을 따른다", listOf("com.google.android.apps.photos"), device.launched)
+    }
+
+    @Test
+    fun `이름으로 연 앱을 확인하지 못해도 다음 후보 앱까지 열지 않는다`() = runTest {
+        val device = FakeDevice()
+        val blind = object : DeviceActions by device {
+            override fun foregroundPkg(): String? = null
+        }
+        val outcome = OpenPreviousApp(blind, BaselineStore(Clock { 0 }, emptySet())).run(mapOf("app" to "gallery"))
+        assertTrue(outcome is RecipeOutcome.Unverifiable)
+        assertEquals(listOf("com.sec.android.gallery3d"), device.launched)
+    }
+
+    @Test
+    fun `허용 목록에 없는 앱 이름이면 아무것도 열지 않는다`() = runTest {
+        val device = FakeDevice()
+        assertEquals(RecipeOutcome.Failed(FailReason.PRECONDITION), OpenPreviousApp(device, BaselineStore(Clock { 0 }, emptySet())).run(mapOf("app" to "bank")))
+        assertTrue(device.launched.isEmpty())
+    }
+
+    @Test
     fun `S3 열 앱도 정상 상태도 없으면 전제 조건 실패`() = runTest {
         val device = FakeDevice()
         assertEquals(RecipeOutcome.Failed(FailReason.PRECONDITION), OpenPreviousApp(device, BaselineStore(Clock { 0 }, emptySet())).run(emptyMap()))

@@ -2,6 +2,7 @@ package app.mergo.recipe
 
 import app.mergo.memory.BaselineStore
 import app.mergo.model.FailReason
+import app.mergo.model.KnownApps
 import app.mergo.model.Recipe
 import app.mergo.model.RecipeIds
 import app.mergo.model.RecipeOutcome
@@ -30,18 +31,32 @@ class SetVolume(private val device: DeviceActions, private val baseline: Baselin
     }
 }
 
-/** S3: 직전 앱을 다시 연다. */
+/**
+ * S3: 직전 앱을 다시 연다. params["app"]이 있으면 [KnownApps]의 그 앱을 연다("유튜브 어딨어").
+ * 이름으로 여는 앱은 허용 목록에 있는 것만이고, 기기마다 다른 패키지를 앞에서부터 시도한다.
+ */
 class OpenPreviousApp(private val device: DeviceActions, private val baseline: BaselineStore) : Recipe {
     override val id = RecipeIds.OPEN_PREVIOUS_APP
 
     override suspend fun run(params: Map<String, String>): RecipeOutcome {
+        params["app"]?.takeIf { it.isNotBlank() }?.let { appId ->
+            val app = KnownApps.byId(appId) ?: return RecipeOutcome.Failed(FailReason.PRECONDITION)
+            // 설치된 첫 패키지 하나만 연다. 열린 뒤 확인이 늦다고 다음 후보까지 열면 앱이 두 개 뜬다.
+            var opened: String? = null
+            val launch = Step(
+                "launch:${app.id}",
+                { opened = app.pkgs.firstOrNull { device.launchApp(it) }; opened != null },
+                { Verifier.waitFor(4_000) { device.foregroundPkg()?.let { it == opened } } },
+            )
+            return StepChain.run(id, listOf(launch))
+        }
         val pkg = (params["pkg"]?.takeIf { it.isNotBlank() } ?: baseline.current?.pkg)?.takeIf { it.isNotBlank() }
             ?: return RecipeOutcome.Failed(FailReason.PRECONDITION)
-        return StepChain.run(
-            id,
-            listOf(Step("launch", { device.launchApp(pkg) }, { Verifier.waitFor(4_000) { device.foregroundPkg()?.let { it == pkg } } })),
-        )
+        return StepChain.run(id, listOf(launch(pkg)))
     }
+
+    private fun launch(pkg: String) =
+        Step("launch:$pkg", { device.launchApp(pkg) }, { Verifier.waitFor(4_000) { device.foregroundPkg()?.let { it == pkg } } })
 }
 
 /**
