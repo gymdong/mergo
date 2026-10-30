@@ -133,6 +133,7 @@ class ReportActivity : Activity() {
             val outcome = when {
                 it.resolved -> AUTO_OUTCOME
                 it.notified -> "가족에게 알림"
+                it.outcome == "guided" -> "안내함"
                 else -> "확인 필요"
             }
             Item("실제 기록 · ${day.format(at)}", it.summary.ifBlank { it.situation }, time.format(at), outcome)

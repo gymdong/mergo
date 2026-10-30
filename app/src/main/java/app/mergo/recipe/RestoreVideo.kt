@@ -1,7 +1,9 @@
 package app.mergo.recipe
 
+import app.mergo.model.FailReason
 import app.mergo.model.Recipe
 import app.mergo.model.RecipeIds
+import app.mergo.model.RecipeOutcome
 import app.mergo.model.ScreenAgent
 import app.mergo.model.ScreenReader
 import app.mergo.service.YouTubeSignals
@@ -23,17 +25,20 @@ class RestoreVideo(
 ) : Recipe {
     override val id = RecipeIds.RESTORE_VIDEO
 
-    override suspend fun run(params: Map<String, String>): Boolean {
+    override suspend fun run(params: Map<String, String>): RecipeOutcome {
         // 돌아갈 정상 상태 영상이 없으면 아무것도 누르지 않는다.
-        val title = params["title"]?.takeIf { it.isNotBlank() } ?: return false
-        val verify: suspend () -> Boolean = {
-            Verifier.waitUntil(verifyTimeoutMs) { YouTubeSignals.sameTitle(currentTitle(), title) }
+        val title = params["title"]?.takeIf { it.isNotBlank() } ?: return RecipeOutcome.Failed(FailReason.PRECONDITION)
+        // 제목을 읽지 못하면(null) 실패가 아니라 검증 불가다.
+        val verify: suspend () -> Boolean? = {
+            Verifier.waitFor(verifyTimeoutMs) { currentTitle()?.let { YouTubeSignals.sameTitle(it, title) } }
         }
         val previous = Step("previous_button", { pressPrevious() }, verify)
         val history = Step("watch_history", { openFromHistory(title) }, verify, cleanup = { leaveHistory() })
         val byAgent = Step("screen_agent", { agent.achieve("'$title' 영상 재생") }, verify)
         // 이미 그 영상을 보고 있으면 아무것도 누르지 않는다.
-        if (device.foregroundPkg() == YouTubeSignals.PKG && YouTubeSignals.sameTitle(currentTitle(), title)) return true
+        if (device.foregroundPkg() == YouTubeSignals.PKG && YouTubeSignals.sameTitle(currentTitle(), title)) {
+            return RecipeOutcome.Verified(acted = false)
+        }
         val steps = if (params["mode"] == "mistouch") listOf(history, previous, byAgent) else listOf(previous, history, byAgent)
         return StepChain.run(id, steps)
     }

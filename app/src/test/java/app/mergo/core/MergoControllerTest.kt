@@ -14,10 +14,12 @@ import app.mergo.model.BrainContext
 import app.mergo.model.BrainDecision
 import app.mergo.model.Clock
 import app.mergo.model.EventKind
+import app.mergo.model.FailReason
 import app.mergo.model.Marker
 import app.mergo.model.ScreenEvent
 import app.mergo.model.Recipe
 import app.mergo.model.RecipeIds
+import app.mergo.model.RecipeOutcome
 import app.mergo.model.YesNo
 import app.mergo.recipe.FakeVoice
 import app.mergo.ui.OverlayPort
@@ -59,14 +61,14 @@ class MergoControllerTest {
         override fun dismiss() {}
     }
 
-    private class FakeRecipe(override val id: String, val ok: Boolean) : Recipe {
+    private class FakeRecipe(override val id: String, val outcome: RecipeOutcome) : Recipe {
         val calls = mutableListOf<Map<String, String>>()
-        override suspend fun run(params: Map<String, String>): Boolean { calls += params; return ok }
+        override suspend fun run(params: Map<String, String>): RecipeOutcome { calls += params; return outcome }
     }
 
     private class Env(
         scope: TestScope,
-        recipeOk: Boolean = true,
+        outcome: RecipeOutcome = RecipeOutcome.Verified(),
         val overlay: FakeOverlay = FakeOverlay(),
         val voice: FakeVoice = FakeVoice(),
         autoExecute: Boolean = false,
@@ -76,7 +78,7 @@ class MergoControllerTest {
         val cooldown = Cooldown()
         val baseline = BaselineStore(clock, emptySet())
         val detector = StuckDetector(clock, DetectorConfig(), cooldown) { baseline.current?.mediaTitle }
-        val recipe = FakeRecipe(RecipeIds.RESTORE_VIDEO, recipeOk)
+        val recipe = FakeRecipe(RecipeIds.RESTORE_VIDEO, outcome)
         val familyLog = FamilyLog(null)
         val brainCalls = mutableListOf<BrainContext>()
         val controller = MergoController(
@@ -135,6 +137,80 @@ class MergoControllerTest {
     }
 
     @Test
+    fun `안내만 하고 끝난 복구는 해결로도 실패로도 세지 않고 가족 알림을 묻지 않는다`() = runTest {
+        val env = Env(this, outcome = RecipeOutcome.Guided("광고가 끝나면 이어서 나와요"), overlay = FakeOverlay(answer = YesNo.YES))
+        env.controller.onSuggestion(env.suggestion)
+        assertEquals(listOf("영상이 바뀐 것 같아요"), env.overlay.asked)
+        assertTrue("완료라고 말하지 않는다", env.overlay.done.isEmpty())
+        val log = env.familyLog.all().single()
+        assertTrue(!log.resolved && !log.notified)
+        assertEquals("guided", log.outcome)
+        assertEquals("광고가 끝나면 이어서 나와요", log.summary)
+    }
+
+    @Test
+    fun `검증 불가 복구는 완료라고 하지 않고, 확인 질문에 답이 없으면 미확인으로 남긴다`() = runTest {
+        val env = Env(
+            this, outcome = RecipeOutcome.Unverifiable("에이전트 완료 선언만 있음"),
+            overlay = FakeOverlay(answer = YesNo.YES, answers = mapOf("이 화면이 맞나요?" to YesNo.NONE)),
+        )
+        env.controller.onSuggestion(env.suggestion)
+        assertTrue(env.overlay.done.isEmpty())
+        assertTrue("제대로 됐는지 봐 주세요" in env.voice.spoken)
+        assertTrue("가족 알림은 묻지 않는다", "제가 해결하지 못했어요" !in env.overlay.asked)
+        val log = env.familyLog.all().single()
+        assertTrue(!log.resolved && !log.notified)
+        assertEquals("unverifiable", log.outcome)
+    }
+
+    @Test
+    fun `검증 불가 복구도 사용자가 맞다고 하면 해결로 기록한다`() = runTest {
+        val env = Env(
+            this, outcome = RecipeOutcome.Unverifiable("에이전트 완료 선언만 있음"),
+            overlay = FakeOverlay(answer = YesNo.YES),
+        )
+        env.controller.onSuggestion(env.suggestion)
+        val log = env.familyLog.all().single()
+        assertTrue(log.resolved)
+        assertEquals("학습 라벨은 검증 불가 그대로", "unverifiable", log.outcome)
+    }
+
+    @Test
+    fun `검증 불가 복구를 아니라고 하면 가족 알림을 묻는다`() = runTest {
+        val env = Env(
+            this, outcome = RecipeOutcome.Unverifiable("에이전트 완료 선언만 있음"),
+            overlay = FakeOverlay(answer = YesNo.YES, answers = mapOf("이 화면이 맞나요?" to YesNo.NO)),
+        )
+        env.controller.onSuggestion(env.suggestion)
+        assertTrue("제가 해결하지 못했어요" in env.overlay.asked)
+        assertEquals(false, env.familyLog.all().single().resolved)
+    }
+
+    @Test
+    fun `머고가 확인했는데 사용자가 아니라고 하면 따로 표시해 남긴다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES, answers = mapOf("이 화면이 맞나요?" to YesNo.NO)))
+        env.controller.onSuggestion(env.suggestion)
+        assertEquals("verified_rejected", env.familyLog.all().single().outcome)
+    }
+
+    @Test
+    fun `확인 없이 실행 모드에서 검증 불가면 묻지도 말하지도 않고 미확인으로 남긴다`() = runTest {
+        val env = Env(this, outcome = RecipeOutcome.Unverifiable("에이전트 완료 선언만 있음"), autoExecute = true)
+        env.controller.onSuggestion(env.suggestion)
+        assertTrue(env.overlay.asked.isEmpty())
+        assertTrue("제대로 됐는지 봐 주세요" !in env.voice.spoken)
+        val log = env.familyLog.all().single()
+        assertTrue(!log.resolved && !log.notified)
+    }
+
+    @Test
+    fun `등록되지 않은 레시피를 고르면 실패로 기록한다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES))
+        env.controller.onSuggestion(env.suggestion.copy(recipeId = RecipeIds.OPEN_INTERNET_PANEL))
+        assertEquals("failed:no_recipe", env.familyLog.all().single().outcome)
+    }
+
+    @Test
     fun `음성 응이 버튼보다 먼저 오면 음성으로 동의한다`() = runTest {
         val env = Env(this, overlay = FakeOverlay(answer = YesNo.NO, answerAfterMs = 10_000), voice = FakeVoice(yesNo = YesNo.YES))
         env.controller.onSuggestion(env.suggestion)
@@ -179,7 +255,7 @@ class MergoControllerTest {
     // AC-R1
     @Test
     fun `복구에 실패하고 가족 알림에 동의하면 가족 기록에 1건 남긴다`() = runTest {
-        val env = Env(this, recipeOk = false, overlay = FakeOverlay(answer = YesNo.YES))
+        val env = Env(this, outcome = RecipeOutcome.Failed(FailReason.NOT_REACHED), overlay = FakeOverlay(answer = YesNo.YES))
         env.controller.onSuggestion(env.suggestion)
         assertEquals(listOf("영상이 바뀐 것 같아요", "제가 해결하지 못했어요"), env.overlay.asked)
         assertEquals(1, env.familyLog.all().size)

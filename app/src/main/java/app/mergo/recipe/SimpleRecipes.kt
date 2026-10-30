@@ -1,8 +1,10 @@
 package app.mergo.recipe
 
 import app.mergo.memory.BaselineStore
+import app.mergo.model.FailReason
 import app.mergo.model.Recipe
 import app.mergo.model.RecipeIds
+import app.mergo.model.RecipeOutcome
 import app.mergo.model.ScreenReader
 import app.mergo.model.VoiceIO
 import app.mergo.service.YouTubeSignals
@@ -17,7 +19,7 @@ class SetVolume(private val device: DeviceActions, private val baseline: Baselin
         return fromBaseline ?: baseline.lastAudibleVolume ?: (device.maxVolume() / 2).coerceAtLeast(1)
     }
 
-    override suspend fun run(params: Map<String, String>): Boolean {
+    override suspend fun run(params: Map<String, String>): RecipeOutcome {
         val target = params["volume"]?.toIntOrNull()?.takeIf { it > 0 } ?: target()
         return StepChain.run(
             id,
@@ -32,18 +34,19 @@ class SetVolume(private val device: DeviceActions, private val baseline: Baselin
 class OpenPreviousApp(private val device: DeviceActions, private val baseline: BaselineStore) : Recipe {
     override val id = RecipeIds.OPEN_PREVIOUS_APP
 
-    override suspend fun run(params: Map<String, String>): Boolean {
-        val pkg = params["pkg"] ?: baseline.current?.pkg ?: return false
+    override suspend fun run(params: Map<String, String>): RecipeOutcome {
+        val pkg = (params["pkg"]?.takeIf { it.isNotBlank() } ?: baseline.current?.pkg)?.takeIf { it.isNotBlank() }
+            ?: return RecipeOutcome.Failed(FailReason.PRECONDITION)
         return StepChain.run(
             id,
-            listOf(Step("launch", { device.launchApp(pkg) }, { Verifier.waitUntil(4_000) { device.foregroundPkg() == pkg } })),
+            listOf(Step("launch", { device.launchApp(pkg) }, { Verifier.waitFor(4_000) { device.foregroundPkg()?.let { it == pkg } } })),
         )
     }
 }
 
 /**
  * S11: 광고 건너뛰기 버튼을 누른다. 버튼이 아직 없으면 최대 10초 기다린다.
- * 건너뛸 수 없는 광고면 안내만 하고 끝낸다. 이 경우도 처리한 것으로 보고 가족 알림으로 넘기지 않는다.
+ * 건너뛸 수 없는 광고면 안내만 하고 끝낸다([RecipeOutcome.Guided]). 해결이 아니지만 가족 알림으로 넘기지도 않는다.
  */
 class SkipAd(
     private val screen: ScreenReader,
@@ -53,7 +56,7 @@ class SkipAd(
 ) : Recipe {
     override val id = RecipeIds.SKIP_AD
 
-    override suspend fun run(params: Map<String, String>): Boolean {
+    override suspend fun run(params: Map<String, String>): RecipeOutcome {
         var waited = 0L
         var told = false
         while (waited <= waitMs) {
@@ -62,7 +65,15 @@ class SkipAd(
             val skip = nodes.firstOrNull { YouTubeSignals.isSkipButton(it, player) }
             if (skip != null) {
                 screen.click(skip.id)
-                return Verifier.waitUntil(3_000) { screen.nodes().none { YouTubeSignals.isSkipButton(it) } }
+                // 창이 바뀌는 중이면 노드가 비어 온다. 빈 화면을 '버튼이 사라졌다'로 읽지 않는다.
+                val gone = Verifier.waitFor(3_000) {
+                    screen.nodes().takeIf { it.isNotEmpty() }?.none { YouTubeSignals.isSkipButton(it) }
+                }
+                return when (gone) {
+                    true -> RecipeOutcome.Verified()
+                    false -> RecipeOutcome.Failed(FailReason.NOT_REACHED)
+                    null -> RecipeOutcome.Unverifiable("건너뛰기 뒤 화면을 읽지 못함")
+                }
             }
             if (!told) {
                 voice.speak("잠시만요, 곧 넘길 수 있어요")
@@ -71,7 +82,8 @@ class SkipAd(
             delay(pollMs)
             waited += pollMs
         }
-        voice.speak("광고가 끝나면 이어서 나와요")
-        return true
+        val said = "광고가 끝나면 이어서 나와요"
+        voice.speak(said)
+        return RecipeOutcome.Guided(said)
     }
 }

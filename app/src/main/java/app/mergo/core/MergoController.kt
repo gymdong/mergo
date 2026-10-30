@@ -11,9 +11,11 @@ import app.mergo.model.Baseline
 import app.mergo.model.Brain
 import app.mergo.model.BrainContext
 import app.mergo.model.Clock
+import app.mergo.model.FailReason
 import app.mergo.model.Marker
 import app.mergo.model.Recipe
 import app.mergo.model.RecipeIds
+import app.mergo.model.RecipeOutcome
 import app.mergo.model.ScreenEvent
 import app.mergo.model.SettingsSource
 import app.mergo.model.VoiceIO
@@ -171,27 +173,50 @@ class MergoController(
         val started = clock.now()
         val text = Texts.of(recipeId)
         automating = true
-        val ok = try {
+        val outcome = try {
             overlay.progress(text.progress)
             voice.speak(text.progress)
-            recipe != null && runCatching { recipe.run(enrich(recipeId, params)) }
-                .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; log("레시피 오류 $recipeId: ${it.message}") }
-                .getOrDefault(false)
+            if (recipe == null) {
+                RecipeOutcome.Failed(FailReason.NO_RECIPE)
+            } else {
+                runCatching { recipe.run(enrich(recipeId, params)) }
+                    .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; log("레시피 오류 $recipeId: ${it.message}") }
+                    .getOrDefault(RecipeOutcome.Failed(FailReason.ERROR))
+            }
         } finally {
             automating = false
             overlay.progress(null)
             detector.afterAutomation(clock.now())
         }
-        log("복구 $recipeId ok=$ok ${clock.now() - started}ms")
-        if (ok) {
-            overlay.done(text.done, "이제 편하게 이어서 보세요.")
-            voice.speak(text.done)
-            // 시안 05: 원래 상태가 맞는지 한 번 더 묻는다. 무응답은 맞는 것으로 본다(어르신 터치 1회 목표 유지).
-            val right = if (settings.autoExecute) YesNo.YES else confirm(Prompt("이 화면이 맞나요?", yes = "예, 맞아요", no = "아니요"), DONE_CHECK_TIMEOUT_MS)
-            if (right != YesNo.NO) {
-                familyLog.add(FamilyLog.Entry(clock.now(), situation, recipeId, notified = false, resolved = true, summary = text.log))
-                return
+        log("복구 $recipeId $outcome ${clock.now() - started}ms")
+        var label = outcome.label()
+        fun record(resolved: Boolean, summary: String, notified: Boolean = false) =
+            familyLog.add(FamilyLog.Entry(clock.now(), situation, recipeId, notified, resolved, summary, label))
+        when (outcome) {
+            is RecipeOutcome.Verified -> {
+                overlay.done(text.done, "이제 편하게 이어서 보세요.")
+                voice.speak(text.done)
+                // 시안 05: 원래 상태가 맞는지 한 번 더 묻는다. 머고가 이미 확인했으므로 무응답은 맞는 것으로 본다(어르신 터치 1회 목표 유지).
+                val right = if (settings.autoExecute) YesNo.YES else confirm(DONE_CHECK, DONE_CHECK_TIMEOUT_MS)
+                if (right != YesNo.NO) return record(resolved = true, summary = text.log)
+                // 머고는 맞다고 확인했는데 사용자는 아니라고 했다. 목표 자체를 잘못 골랐다는 신호라 따로 남긴다.
+                label = "verified_rejected"
             }
+            // 레시피가 이미 안내했다. 해결도 실패도 아니므로 가족 알림을 묻지 않는다.
+            is RecipeOutcome.Guided -> return record(resolved = false, summary = outcome.said)
+            is RecipeOutcome.Unverifiable -> {
+                // 머고가 결과를 확인하지 못했으니 '다 됐어요'라고 하지 않는다. 사용자가 "예"라고 해야만 해결로 기록하고, 무응답은 미확인으로 둔다.
+                // 확인 없이 실행 모드에서는 물을 수 없으니 미확인으로만 남긴다.
+                val right = if (settings.autoExecute) {
+                    YesNo.NONE
+                } else {
+                    voice.speak("제대로 됐는지 봐 주세요")
+                    confirm(DONE_CHECK, DONE_CHECK_TIMEOUT_MS)
+                }
+                if (right == YesNo.YES) return record(resolved = true, summary = text.log)
+                if (right == YesNo.NONE) return record(resolved = false, summary = UNCHECKED_LOG)
+            }
+            is RecipeOutcome.Failed -> Unit
         }
         val tellFamily = if (settings.autoExecute) {
             YesNo.YES
@@ -199,8 +224,16 @@ class MergoController(
             confirm(Prompt("제가 해결하지 못했어요", "가족에게 알릴까요?", yes = "예, 알려 주세요", no = "아니요"))
         }
         val notified = tellFamily == YesNo.YES
-        familyLog.add(FamilyLog.Entry(clock.now(), situation, recipeId, notified = notified, resolved = false, summary = text.failLog))
+        record(resolved = false, summary = text.failLog, notified = notified)
         if (notified) voice.speak("가족에게 알렸어요")
+    }
+
+    /** 가족 기록에 남기는 결과 이름. 나중에 학습 라벨로 쓸 때 해결/안내/미확인/실패를 구분한다. */
+    private fun RecipeOutcome.label(): String = when (this) {
+        is RecipeOutcome.Verified -> if (acted) "verified" else "verified_noop"
+        is RecipeOutcome.Guided -> "guided"
+        is RecipeOutcome.Unverifiable -> "unverifiable"
+        is RecipeOutcome.Failed -> "failed:${reason.name.lowercase()}"
     }
 
     /** 말로 받은 복구에 빠진 값을 정상 상태로 채운다. 예: "아까 보던 거" → 정상 상태의 영상 제목. */
@@ -255,6 +288,8 @@ class MergoController(
         const val BUBBLE_TIMEOUT_MS = 15_000L
         const val LISTEN_TIMEOUT_MS = 5_000L
         const val DONE_CHECK_TIMEOUT_MS = 10_000L
+        val DONE_CHECK = Prompt("이 화면이 맞나요?", yes = "예, 맞아요", no = "아니요")
+        const val UNCHECKED_LOG = "해결됐는지 확인하지 못했어요"
         val HELP_CHOICES = listOf("아까 보던 거", "소리가 안 나", "이거 안 꺼져", "광고 안 꺼져")
     }
 }

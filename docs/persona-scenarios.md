@@ -123,7 +123,7 @@
 - 허용: 확인 후 `open_internet_panel`
 - 검증: 10초 안에 `online=true` → 검증 성공 / 아니면 실패
 - 반례: 데이터를 아끼려고 일부러 꺼 둔 경우. 자동 제안하지 않는다
-- 경로: 호출. **현재 `MergoService`의 레시피 목록에 `open_internet_panel` 구현이 등록돼 있지 않아**, 이 후보가 골라지면 실행 단계에서 실패로 끝난다(스펙상 스트레치 항목)
+- 경로: 호출. **현재 `MergoService`의 레시피 목록에 `open_internet_panel` 구현이 등록돼 있지 않아**, 이 후보가 골라지면 "인터넷을 다시 연결해 볼까요?"라고 말만 하고 아무것도 하지 않는다(§4.4, 스펙상 스트레치 항목)
 
 ### 정만석 (66)
 
@@ -236,34 +236,27 @@
 | 검증 불가 | "제대로 됐는지 봐 주세요" + 완료 확인 **필수** | 미확인. 무응답을 해결로 기록하지 않음 | 저장하지 않음. 같은 목표가 자주 나오면 검증 조건을 사람이 추가할 후보 |
 | 실패 | "해결하지 못했어요" + 가족 알림 질문 | 미해결 + 사유 | 저장하지 않음. 실패 사유는 레시피 개선 자료 |
 
-### 4.4 지금 코드가 섞어 쓰는 곳
+### 4.4 코드 반영 (2026-10-30)
 
-`Recipe.run()`은 `Boolean`이라(`model/Recipes.kt:6`) 네 분류가 두 값으로 뭉친다.
+`Recipe.run()`이 `Boolean` 대신 `RecipeOutcome`을 돌려준다(`model/Recipes.kt`). 각 위치는 다음과 같이 분류한다.
 
-| 위치 | 지금 | 분류해야 할 것 |
+| 위치 | 예전 | 지금 |
 |---|---|---|
-| `SkipAd` — 10초 기다려도 버튼 없음 (`recipe/SimpleRecipes.kt:56-75`) | `true` | 안내만 함. 지금은 "가족 알림 질문을 띄우지 않으려고" `true`를 쓴다. Boolean이 거짓 성공을 강제하는 사례다 |
-| `SCREEN_AGENT` 레시피 (`service/MergoService.kt:118-121`) | `achieve()` 결과 그대로 | 에이전트가 행동 후 `done`이면 지금은 `true`. 목표별 검증 조건이 없으면 검증 불가 |
-| `LlmScreenAgent` — `SafetyGuard` 중단·단계 초과·LLM `fail` (`agent/LlmScreenAgent.kt:22-70`) | `false` | 실패. 사유를 구분해 남긴다(안전 중단은 레시피 품질 문제와 다르다) |
-| `RestoreVideo` — 정상 상태 제목 없음 (`recipe/RestoreVideo.kt:28`) | `false` | 실패(전제 조건 없음) |
-| `RestoreVideo` — 이미 그 영상 재생 중 (`recipe/RestoreVideo.kt:36`) | `true` | 검증 성공 + 조작 없음 |
-| `RestoreVideo` — `currentTitle()`이 `null`이라 검증 시간 초과 | `false` | 검증 불가. 지금은 실패와 구분되지 않는다 |
-| `SetVolume`·`OpenPreviousApp` 검증 | `Verifier`로 확인 | 이미 검증 성공/실패를 제대로 가른다 |
-| `open_internet_panel` | 레시피 미등록 → `false` | 실패(레시피 없음). 연결 누락인지 의도된 보류인지 확인 필요 |
-| `MergoController.execute()` 완료 확인 무응답 (`core/MergoController.kt:202-235`) | `resolved = true` | 검증 성공일 때만 해결로 기록. 검증 불가 + 무응답은 미확인 |
+| `SkipAd` — 10초 기다려도 버튼 없음 | `true`(가족 알림 질문을 피하려는 거짓 성공) | `Guided`. 가족 알림을 묻지 않고, 리포트에 "안내함"으로 보인다 |
+| `SkipAd` — 클릭 후 버튼이 사라지지 않음 | `false` | `Failed(NOT_REACHED)` |
+| `SkipAd` — 클릭 후 화면 노드가 비어 옴(창 전환 중) | `true`(빈 화면을 '버튼 사라짐'으로 읽음) | `Unverifiable` |
+| `SCREEN_AGENT` 레시피 (`service/MergoService.kt`) | `achieve()` 결과 그대로 | 완료면 `Unverifiable`, 실패면 `Failed(AGENT_GAVE_UP)` |
+| `RestoreVideo` — 정상 상태 제목 없음 | `false` | `Failed(PRECONDITION)` |
+| `RestoreVideo` — 이미 그 영상 재생 중 | `true` | `Verified(acted = false)` |
+| `RestoreVideo` — 조작 뒤 제목을 끝내 읽지 못함 | `false` | `Unverifiable`. 검증 함수가 `null`(읽지 못함)을 돌려줄 수 있다(`Verifier.waitFor`) |
+| `OpenPreviousApp` — 열 앱도 정상 상태도 없음 | `false` | `Failed(PRECONDITION)` |
+| `StepChain` — 여러 방법을 차례로 시도 | 하나라도 검증되면 `true` | 하나라도 검증되면 `Verified`, 아니면 **마지막으로 실행한 방법**의 확인 결과를 따른다(못 읽음 → `Unverifiable`, 달랐음 → `Failed`) |
+| 등록되지 않은 레시피 / 실행 중 예외 | `false` | `Failed(NO_RECIPE)` / `Failed(ERROR)` |
+| `MergoController.execute()` | 성공 + 완료 확인 무응답 = 해결 | `Verified`만 무응답을 해결로 본다. `Verified`인데 사용자가 "아니요"면 `verified_rejected`로 남긴다. `Unverifiable`은 "제대로 됐는지 봐 주세요" 뒤 "예"일 때만 해결, 무응답은 미확인, "아니요"는 가족 알림 질문. 확인 없이 실행 모드에서는 묻지 않고 미확인으로 남긴다 |
 
-### 4.5 계약 변경 제안 (A/B 합의 필요)
+`FamilyLog.Entry.outcome`에 `verified`·`verified_noop`·`verified_rejected`·`guided`·`unverifiable`·`failed:사유`를 남긴다. 나중에 학습 라벨로 쓸 때 해결/안내/미확인/실패를 구분하기 위해서다. 예전 기록은 빈 값이다.
 
-`model/`은 A/B 공동 계약이다(`work-split.md`). B가 음성 쪽 `model/`을 고치는 중이므로 함께 바꿀지, B 병합 뒤에 바꿀지 먼저 정한다. 형태는 예시이며 확정이 아니다.
-
-```kotlin
-sealed interface RecipeOutcome {
-    data class Verified(val acted: Boolean) : RecipeOutcome
-    data class Guided(val said: String) : RecipeOutcome
-    data class Unverifiable(val why: String) : RecipeOutcome
-    data class Failed(val reason: FailReason) : RecipeOutcome
-}
-enum class FailReason { PRECONDITION, NOT_REACHED, SAFETY_STOP, BUDGET_EXCEEDED, LLM_GAVE_UP, NO_RECIPE, ERROR }
-```
-
-바꿀 때는 위 4.4 표의 각 행을 테스트로 먼저 고정한다. 특히 `SkipAd` 안내 종료와 에이전트 `done`이 각각 `Guided`·`Unverifiable`로 나오는지, 그리고 컨트롤러가 이 둘을 해결로 기록하지 않는지를 확인한다.
+**아직 남은 것**
+- `ScreenAgent.achieve()`는 여전히 `Boolean`(B 소유 `model/Screen.kt`)이라 안전 중단·단계 초과·LLM 포기를 `AGENT_GAVE_UP` 하나로 묶는다. 사유를 나누려면 이 계약을 바꿔야 한다.
+- 에이전트 목표별 검증 조건(예: "광고 닫기" → 닫기 노드가 사라지고 같은 앱 유지)이 생기면 그 목표는 `Unverifiable` 대신 `Verified`/`Failed`로 바뀐다.
+- `open_internet_panel`은 레시피 목록에 없다. 도와줘 경로에서는 `MergoController.onHelp`가 등록되지 않은 레시피를 되묻기처럼 처리해, Brain의 안내 문장("인터넷을 다시 연결해 볼까요?")만 말하고 아무것도 하지 않는다. 연결 누락인지 의도된 보류인지 정해야 한다.

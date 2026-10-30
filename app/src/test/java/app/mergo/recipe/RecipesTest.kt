@@ -2,10 +2,11 @@ package app.mergo.recipe
 
 import app.mergo.memory.BaselineStore
 import app.mergo.model.Clock
+import app.mergo.model.FailReason
+import app.mergo.model.RecipeOutcome
 import app.mergo.service.YouTubeSignals
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -22,8 +23,8 @@ class RecipesTest {
         screen.nodeList = listOf(titleNode(title), prev)
         screen.onClick = { if (it === prev) title = "트로트 메들리" }
         val agent = FakeAgent()
-        val ok = RestoreVideo(screen, device, { title }, agent).run(mapOf("title" to "트로트 메들리", "mode" to "autoplay"))
-        assertTrue(ok)
+        val outcome = RestoreVideo(screen, device, { title }, agent).run(mapOf("title" to "트로트 메들리", "mode" to "autoplay"))
+        assertEquals(RecipeOutcome.Verified(), outcome)
         assertEquals(listOf(prev), screen.clicks)
         assertTrue("시청 기록은 열지 않는다", device.opened.isEmpty())
         assertTrue(agent.goals.isEmpty())
@@ -39,7 +40,7 @@ class RecipesTest {
         screen.nodeList = listOf(fullScreenContainer, player)
         screen.onTap = { screen.nodeList = listOf(fullScreenContainer, player, prev) }
         screen.onClick = { if (it === prev) title = "트로트 메들리" }
-        assertTrue(RestoreVideo(screen, FakeDevice(), { title }, FakeAgent()).run(mapOf("title" to "트로트 메들리")))
+        assertEquals(RecipeOutcome.Verified(), RestoreVideo(screen, FakeDevice(), { title }, FakeAgent()).run(mapOf("title" to "트로트 메들리")))
         assertEquals(1, screen.taps.size)
     }
 
@@ -54,7 +55,7 @@ class RecipesTest {
         device.onOpenUri = { screen.nodeList = listOf(n(text = "오늘의 뉴스"), historyItem) }
         screen.onClick = { if (it === historyItem) title = "트로트 메들리" }
         val agent = FakeAgent()
-        assertTrue(RestoreVideo(screen, device, { title }, agent).run(mapOf("title" to "트로트 메들리")))
+        assertEquals(RecipeOutcome.Verified(), RestoreVideo(screen, device, { title }, agent).run(mapOf("title" to "트로트 메들리")))
         assertEquals(listOf(RestoreVideo.HISTORY_URI), device.opened)
         assertTrue(agent.goals.isEmpty())
     }
@@ -70,20 +71,20 @@ class RecipesTest {
         screen.nodeList = listOf(prev)
         device.onOpenUri = { screen.nodeList = listOf(historyItem) }
         screen.onClick = { if (it === historyItem) title = "트로트 메들리" }
-        assertTrue(RestoreVideo(screen, device, { title }, FakeAgent()).run(mapOf("title" to "트로트 메들리", "mode" to "mistouch")))
+        assertEquals(RecipeOutcome.Verified(), RestoreVideo(screen, device, { title }, FakeAgent()).run(mapOf("title" to "트로트 메들리", "mode" to "mistouch")))
         assertEquals(listOf(historyItem), screen.clicks)
     }
 
     // AC-R1
     @Test
-    fun `모든 방법이 실패하면 기록 화면을 닫고 에이전트까지 시도한 뒤 false`() = runTest {
+    fun `모든 방법이 실패하면 기록 화면을 닫고 에이전트까지 시도한 뒤 목표 미도달로 실패`() = runTest {
         val screen = FakeScreen()
         val device = FakeDevice()
         screen.nodeList = listOf(titleNode("오늘의 뉴스"))
         device.onOpenUri = { screen.nodeList = listOf(n(text = "History"), n(text = "관계없는 영상")) }
         val agent = FakeAgent(result = false)
-        val ok = RestoreVideo(screen, device, { "오늘의 뉴스" }, agent).run(mapOf("title" to "트로트 메들리"))
-        assertFalse(ok)
+        val outcome = RestoreVideo(screen, device, { "오늘의 뉴스" }, agent).run(mapOf("title" to "트로트 메들리"))
+        assertEquals(RecipeOutcome.Failed(FailReason.NOT_REACHED), outcome)
         assertEquals(listOf("'트로트 메들리' 영상 재생"), agent.goals)
         assertEquals("기록을 열었다 못 찾으면 뒤로 가기로 닫는다", 1, screen.backs)
     }
@@ -95,16 +96,34 @@ class RecipesTest {
         // 에뮬레이터에서 본 상황: 화면 전체 컨테이너만 있고, 기록 링크를 열어도 기록 화면이 아니다(로그인 실패).
         screen.nodeList = listOf(n(viewId = "$yt:id/slim_status_bar_player_container", clickable = false))
         device.onOpenUri = { screen.nodeList = listOf(n(text = "Couldn't sign in.")) }
-        assertFalse(RestoreVideo(screen, device, { "오늘의 뉴스" }, FakeAgent()).run(mapOf("title" to "트로트 메들리")))
+        assertEquals(RecipeOutcome.Failed(FailReason.NOT_REACHED), RestoreVideo(screen, device, { "오늘의 뉴스" }, FakeAgent()).run(mapOf("title" to "트로트 메들리")))
         assertTrue(screen.taps.isEmpty())
         assertEquals(0, screen.backs)
     }
 
     @Test
-    fun `이미 원래 영상을 보고 있으면 아무것도 누르지 않고 성공`() = runTest {
+    fun `이미 원래 영상을 보고 있으면 아무것도 누르지 않고 조작 없는 성공`() = runTest {
         val screen = FakeScreen()
-        assertTrue(RestoreVideo(screen, FakeDevice(), { "트로트 메들리" }, FakeAgent()).run(mapOf("title" to "트로트 메들리")))
+        assertEquals(RecipeOutcome.Verified(acted = false), RestoreVideo(screen, FakeDevice(), { "트로트 메들리" }, FakeAgent()).run(mapOf("title" to "트로트 메들리")))
         assertTrue(screen.clicks.isEmpty() && screen.taps.isEmpty())
+    }
+
+    @Test
+    fun `돌아갈 영상 제목이 없으면 아무것도 누르지 않고 전제 조건 실패`() = runTest {
+        val screen = FakeScreen()
+        val device = FakeDevice()
+        assertEquals(RecipeOutcome.Failed(FailReason.PRECONDITION), RestoreVideo(screen, device, { "오늘의 뉴스" }, FakeAgent()).run(mapOf("title" to "")))
+        assertTrue(screen.clicks.isEmpty() && screen.taps.isEmpty() && device.opened.isEmpty())
+    }
+
+    @Test
+    fun `조작 뒤 영상 제목을 읽지 못하면 실패가 아니라 검증 불가`() = runTest {
+        val screen = FakeScreen()
+        val prev = n(desc = "이전 동영상")
+        screen.nodeList = listOf(prev)
+        val outcome = RestoreVideo(screen, FakeDevice(), { null }, FakeAgent(result = false), verifyTimeoutMs = 300).run(mapOf("title" to "트로트 메들리"))
+        assertTrue(outcome is RecipeOutcome.Unverifiable)
+        assertEquals(listOf(prev), screen.clicks)
     }
 
     @Test
@@ -117,7 +136,7 @@ class RecipesTest {
         now = 10_000
         store.tick(now)
         val device = FakeDevice().apply { vol = 0 }
-        assertTrue(SetVolume(device, store).run(emptyMap()))
+        assertEquals(RecipeOutcome.Verified(), SetVolume(device, store).run(emptyMap()))
         assertEquals(6, device.vol)
     }
 
@@ -125,7 +144,7 @@ class RecipesTest {
     fun `S4 기록이 전혀 없으면 최대의 절반으로 켠다`() = runTest {
         val store = BaselineStore(Clock { 0 }, emptySet())
         val device = FakeDevice().apply { vol = 0; max = 15 }
-        assertTrue(SetVolume(device, store).run(emptyMap()))
+        assertEquals(RecipeOutcome.Verified(), SetVolume(device, store).run(emptyMap()))
         assertEquals(7, device.vol)
     }
 
@@ -133,8 +152,15 @@ class RecipesTest {
     fun `S3 직전 앱을 다시 연다`() = runTest {
         val store = BaselineStore(Clock { 0 }, emptySet())
         val device = FakeDevice().apply { fg = "launcher" }
-        assertTrue(OpenPreviousApp(device, store).run(mapOf("pkg" to yt)))
+        assertEquals(RecipeOutcome.Verified(), OpenPreviousApp(device, store).run(mapOf("pkg" to yt)))
         assertEquals(listOf(yt), device.launched)
+    }
+
+    @Test
+    fun `S3 열 앱도 정상 상태도 없으면 전제 조건 실패`() = runTest {
+        val device = FakeDevice()
+        assertEquals(RecipeOutcome.Failed(FailReason.PRECONDITION), OpenPreviousApp(device, BaselineStore(Clock { 0 }, emptySet())).run(emptyMap()))
+        assertTrue(device.launched.isEmpty())
     }
 
     @Test
@@ -150,17 +176,41 @@ class RecipesTest {
                 return screen.nodes()
             }
         }
-        screen.onClick = { screen.nodeList = emptyList() }
-        assertTrue(SkipAd(delayed, voice).run(emptyMap()))
+        screen.onClick = { screen.nodeList = listOf(n(text = "트로트 메들리", clickable = false)) }
+        assertEquals(RecipeOutcome.Verified(), SkipAd(delayed, voice).run(emptyMap()))
         assertEquals(listOf(skip), screen.clicks)
         assertEquals(listOf("잠시만요, 곧 넘길 수 있어요"), voice.spoken)
+    }
+
+    @Test
+    fun `S11 누른 뒤 화면을 읽지 못하면 버튼이 사라졌다고 보지 않고 검증 불가`() = runTest {
+        val skip = n(text = "광고 건너뛰기")
+        val screen = FakeScreen().apply { nodeList = listOf(skip); onClick = { nodeList = emptyList() } }
+        assertTrue(SkipAd(screen, FakeVoice()).run(emptyMap()) is RecipeOutcome.Unverifiable)
+    }
+
+    @Test
+    fun `S11 눌렀는데 건너뛰기 버튼이 그대로면 실패`() = runTest {
+        val skip = n(text = "광고 건너뛰기")
+        val screen = FakeScreen().apply { nodeList = listOf(skip) }
+        assertEquals(RecipeOutcome.Failed(FailReason.NOT_REACHED), SkipAd(screen, FakeVoice()).run(emptyMap()))
+    }
+
+    @Test
+    fun `S3 앱을 연 뒤 지금 앱을 읽지 못하면 검증 불가`() = runTest {
+        val device = FakeDevice()
+        val blind = object : DeviceActions by device {
+            override fun foregroundPkg(): String? = null
+        }
+        assertTrue(OpenPreviousApp(blind, BaselineStore(Clock { 0 }, emptySet())).run(mapOf("pkg" to yt)) is RecipeOutcome.Unverifiable)
+        assertEquals(listOf(yt), device.launched)
     }
 
     @Test
     fun `S11 건너뛸 수 없는 광고면 안내만 하고 끝낸다`() = runTest {
         val screen = FakeScreen().apply { nodeList = listOf(n(text = "광고 · 0:15", clickable = false)) }
         val voice = FakeVoice()
-        assertTrue(SkipAd(screen, voice).run(emptyMap()))
+        assertEquals(RecipeOutcome.Guided("광고가 끝나면 이어서 나와요"), SkipAd(screen, voice).run(emptyMap()))
         assertTrue(screen.clicks.isEmpty())
         assertEquals("광고가 끝나면 이어서 나와요", voice.spoken.last())
     }

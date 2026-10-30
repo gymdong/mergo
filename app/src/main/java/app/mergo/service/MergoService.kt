@@ -29,9 +29,11 @@ import app.mergo.memory.FamilyLog
 import app.mergo.memory.TimelineBuffer
 import app.mergo.model.Clock
 import app.mergo.model.EventKind
+import app.mergo.model.FailReason
 import app.mergo.model.Marker
 import app.mergo.model.Recipe
 import app.mergo.model.RecipeIds
+import app.mergo.model.RecipeOutcome
 import app.mergo.model.ScreenAgent
 import app.mergo.model.ScreenEvent
 import app.mergo.recipe.OpenPreviousApp
@@ -116,7 +118,10 @@ class MergoService : AccessibilityService() {
             SkipAd(screen, voice),
             object : Recipe {
                 override val id = RecipeIds.SCREEN_AGENT
-                override suspend fun run(params: Map<String, String>) = agent.achieve(params["goal"] ?: "화면 문제 해결")
+                // 에이전트의 '완료'는 LLM의 선언일 뿐이다. 목표별 검증 조건이 생기기 전까지는 검증 불가로 둔다.
+                override suspend fun run(params: Map<String, String>) =
+                    if (agent.achieve(params["goal"] ?: "화면 문제 해결")) RecipeOutcome.Unverifiable("에이전트 완료 선언만 있음")
+                    else RecipeOutcome.Failed(FailReason.AGENT_GAVE_UP)
             },
         ).associateBy { it.id }
 
