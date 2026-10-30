@@ -36,6 +36,7 @@ class BaselineStore(
 
     private var pkg: Live<String?> = Live(null, 0, false)
     private var title: Live<String?> = Live(null, 0, false)
+    private var titlePkg: String? = null
     private var volume: Live<Int?> = Live(null, 0, false)
     private var online: Live<Boolean?> = Live(null, 0, false)
 
@@ -53,6 +54,7 @@ class BaselineStore(
         if (e.pkg in ignoredPkgs) return
         update(pkg, e.pkg, e.ts)
         if (e.title != null) {
+            titlePkg = e.pkg
             if (titleByCountdown) {
                 if (title.value != e.title) {
                     title.value = e.title
@@ -99,8 +101,9 @@ class BaselineStore(
         commit(now, force = true)
     }
 
+    /** 제목을 낸 앱을 떠나면(예: YouTube → Chrome) 이전 영상 제목을 지금 화면 제목으로 내지 않는다. */
     @Synchronized
-    fun liveTitle(): String? = title.value
+    fun liveTitle(): String? = title.value?.takeIf { pkg.value == titlePkg }
 
     @Synchronized
     fun livePkg(): String? = pkg.value

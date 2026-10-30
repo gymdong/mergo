@@ -106,6 +106,17 @@ class MergoControllerTest {
     }
 
     @Test
+    fun `YouTube 광고를 본 뒤 다른 앱으로 가면 광고 중으로 보지 않는다`() = runTest {
+        val env = Env(this)
+        val yt = app.mergo.service.YouTubeSignals.PKG
+        env.controller.onScreenEvent(ScreenEvent(0, yt, "트로트 메들리", emptyList(), false, EventKind.CONTENT_CHANGED, setOf(Marker.AD_SHOWING)))
+        assertTrue(env.controller.brainContext("광고 좀 닫아줘").screenHasAd)
+
+        env.controller.onScreenEvent(ScreenEvent(1_000, "com.android.chrome", null, emptyList(), true, EventKind.WINDOW_CHANGED))
+        assertEquals(false, env.controller.brainContext("광고 좀 닫아줘").screenHasAd)
+    }
+
+    @Test
     fun `말풍선에서 예를 누르면 복구 중 안내 뒤 레시피를 실행하고 완료를 알린다`() = runTest {
         val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES))
         env.controller.onSuggestion(env.suggestion)

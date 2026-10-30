@@ -193,7 +193,9 @@ class MergoController(
             diff = DiffBuilder.diff(baseline.current, now),
             timeline = timeline.summaryLines(),
             current = now,
-            screenHasAd = Marker.AD_SKIP_VISIBLE in lastMarkers || Marker.AD_SHOWING in lastMarkers,
+            // 광고 표시는 YouTube 화면에서만 갱신된다. 다른 앱에 있으면 예전 YouTube 광고로 판단하지 않는다.
+            screenHasAd = now.pkg == app.mergo.service.YouTubeSignals.PKG &&
+                (Marker.AD_SKIP_VISIBLE in lastMarkers || Marker.AD_SHOWING in lastMarkers),
         )
     }
 
