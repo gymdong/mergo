@@ -68,7 +68,8 @@ class OverlayUi(
     }
 
     /**
-     * 누르면 도와줘, [HOLD_TO_MOVE_MS] 이상 누르고 있으면 손가락을 따라 옮긴다. 놓으면 그 자리를 기억한다.
+     * 누르면 도와줘, [HOLD_TO_MOVE_MS] 이상 누른 뒤 일정 거리 움직이면 버튼을 옮긴다.
+     * 오래 눌렀어도 움직이지 않았다면 도와줘를 실행한다. 옮긴 위치는 손을 놓을 때 기억한다.
      * 손떨림으로 조금 움직인 것은 누르기로 보고, 누르기 전에 크게 미끄러지면 아무것도 하지 않는다.
      */
     private fun moveOnHold(b: View, lp: WindowManager.LayoutParams) {
@@ -77,10 +78,11 @@ class OverlayUi(
         var startX = 0
         var startY = 0
         var moving = false
+        var moveArmed = false
         var slid = false
         val slop = TAP_SLOP_DP * service.resources.displayMetrics.density
         val hold = Runnable {
-            moving = true
+            moveArmed = true
             b.alpha = 0.75f
             b.scaleX = 1.1f
             b.scaleY = 1.1f
@@ -93,6 +95,7 @@ class OverlayUi(
                     startX = lp.x
                     startY = lp.y
                     moving = false
+                    moveArmed = false
                     slid = false
                     v.isPressed = true
                     v.postDelayed(hold, HOLD_TO_MOVE_MS)
@@ -100,6 +103,7 @@ class OverlayUi(
                 MotionEvent.ACTION_MOVE -> {
                     val dx = e.rawX - downX
                     val dy = e.rawY - downY
+                    if (moveArmed && !moving && dx * dx + dy * dy > slop * slop) moving = true
                     if (moving) {
                         // 오른쪽 아래 기준이라 손가락이 오른쪽·아래로 가면 x·y가 줄어든다.
                         val screen = service.resources.displayMetrics
@@ -115,10 +119,12 @@ class OverlayUi(
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     v.removeCallbacks(hold)
                     v.isPressed = false
-                    if (moving) {
+                    if (moveArmed) {
                         b.alpha = 1f
                         b.scaleX = 1f
                         b.scaleY = 1f
+                    }
+                    if (moving) {
                         prefs.edit().putInt(KEY_HELP_X, lp.x).putInt(KEY_HELP_Y, lp.y).apply()
                     } else if (e.actionMasked == MotionEvent.ACTION_UP && !slid) {
                         v.performClick()
@@ -158,6 +164,19 @@ class OverlayUi(
                 }
             }.also { if (it == null) removeSheet() }
         }
+
+    override fun listening(prompt: String, ready: Boolean) {
+        service.mainExecutor.execute {
+            removeSheet()
+            val box = sheetContainer(DEEP_GREEN).apply {
+                addView(label(if (ready) "듣고 있어요" else "마이크 준비 중", 18f, LIME, center = true))
+                addView(label(prompt, 28f, Color.WHITE, center = true))
+            }
+            wm.addView(box, params(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM, touchable = false))
+            sheet = box
+        }
+    }
 
     override fun progress(text: String?) {
         service.mainExecutor.execute {
@@ -252,7 +271,7 @@ class OverlayUi(
     private fun showChoosePanel(prompt: String, choices: List<String>, onPick: (String?) -> Unit) {
         removeSheet()
         val box = sheetContainer(DEEP_GREEN)
-        box.addView(label("듣고 있어요", 18f, LIME, center = true))
+        box.addView(label("말하거나 골라 주세요", 18f, LIME, center = true))
         box.addView(label(prompt, 28f, Color.WHITE, center = true).apply { setPadding(0, dp(4), 0, dp(4)) })
         box.addView(View(service), LinearLayout.LayoutParams(1, dp(12)))
         for (c in choices) {
@@ -353,8 +372,8 @@ class OverlayUi(
         const val PREFS = "mergo_overlay"
         const val KEY_HELP_X = "help_x"
         const val KEY_HELP_Y = "help_y"
-        /** 이만큼 누르고 있으면 도와줘 대신 옮기기. 어르신이 천천히 누르는 것을 감안해 길게 둔다. */
-        const val HOLD_TO_MOVE_MS = 800L
+        /** 이만큼 누른 뒤 움직여야 옮기기. 어르신이 천천히 누르는 것을 감안해 길게 둔다. */
+        const val HOLD_TO_MOVE_MS = 2_000L
         /** 손떨림으로 이 안에서 움직인 것은 그대로 누르기로 본다. */
         const val TAP_SLOP_DP = 24f
         const val NOTICE_MS = 8_000L
