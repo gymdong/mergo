@@ -1,18 +1,23 @@
 package app.mergo.report
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.Switch
 import android.widget.TextView
 
 /** UI 가이드(mergo_UI.pdf)에서 뽑은 색. 글씨는 스펙대로 최소 18sp로 맞춘다. */
 object Palette {
-    val BACKGROUND = Color.parseColor("#FAFBF8")
+    val BACKGROUND = Color.parseColor("#F4F5F0")
     val PRIMARY = Color.parseColor("#2B684F")
     val ACCENT = Color.parseColor("#37745F")
     val INK = Color.parseColor("#1D302A")
@@ -20,9 +25,62 @@ object Palette {
     val MUTED = Color.parseColor("#7A8580")
     val LINE = Color.parseColor("#D5DDD8")
     val TINT = Color.parseColor("#E7EBE4")
+    val DEEP = Color.parseColor("#225646")
+    val LIME = Color.parseColor("#C5E26B")
+    val BAR = Color.parseColor("#7BA392")
+    val SOFT = Color.parseColor("#E1E9E3")
+    val ALERT = Color.parseColor("#B4532A")
+    val ALERT_TINT = Color.parseColor("#F6E4DB")
+    val ALERT_AVATAR = Color.parseColor("#D98B5F")
 }
 
 fun Context.dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+fun Context.rounded(color: Int, radiusDp: Int): GradientDrawable = GradientDrawable().apply {
+    setColor(color)
+    cornerRadius = dp(radiusDp).toFloat()
+}
+
+fun Context.icon(resId: Int, tint: Int, sizeDp: Int = 24): ImageView = ImageView(this).apply {
+    setImageResource(resId)
+    imageTintList = ColorStateList.valueOf(tint)
+    layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+}
+
+/** 시안의 동그란 아이콘 배경. */
+fun Context.iconCircle(resId: Int, tint: Int = Palette.ACCENT, fill: Int = Palette.SOFT, sizeDp: Int = 52): FrameLayout =
+    FrameLayout(this).apply {
+        background = rounded(fill, sizeDp / 2)
+        addView(icon(resId, tint), FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER))
+        layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+    }
+
+/** 가로 한 줄. [middle]이 남는 폭을 차지한다. */
+fun Context.row(vararg parts: View, middle: View? = null): LinearLayout = LinearLayout(this).apply {
+    orientation = LinearLayout.HORIZONTAL
+    gravity = Gravity.CENTER_VERTICAL
+    parts.forEach { addView(it) }
+    middle?.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+        if (middle !== parts.first()) marginStart = dp(14)
+        marginEnd = dp(10)
+    }
+}
+
+/** 시안의 초록 스위치. 켜고 끄는 일은 줄을 눌러 처리하는 곳에서도 쓰도록 모양만 맞춘다. */
+fun Context.greenSwitch(on: Boolean): Switch = Switch(this).apply {
+    isChecked = on
+    fun track(color: Int) = rounded(color, 14).apply { setSize(dp(48), dp(28)) }
+    trackDrawable = StateListDrawable().apply {
+        addState(intArrayOf(android.R.attr.state_checked), track(Palette.PRIMARY))
+        addState(intArrayOf(), track(Palette.LINE))
+    }
+    thumbDrawable = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(Color.WHITE)
+        setSize(dp(28), dp(28))
+        setStroke(dp(4), Color.TRANSPARENT)
+    }
+}
 
 fun Context.label(
     text: String,
@@ -77,9 +135,8 @@ fun Context.chip(text: String, selected: Boolean, onClick: () -> Unit): TextView
         gravity = Gravity.CENTER
         minHeight = dp(48)
         setPadding(dp(16), dp(10), dp(16), dp(10))
-        background = GradientDrawable().apply {
-            setColor(if (selected) Palette.PRIMARY else Palette.TINT)
-            cornerRadius = dp(24).toFloat()
+        background = rounded(if (selected) Palette.PRIMARY else Color.WHITE, 24).apply {
+            if (!selected) setStroke(dp(1), Palette.LINE)
         }
         layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,

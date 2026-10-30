@@ -22,6 +22,21 @@ class MergoSettings(context: Context) : SettingsSource {
         get() = prefs.getBoolean(KEY_DISPLAY_AUTO_RESCUE, false)
         set(value) = prefs.edit().putBoolean(KEY_DISPLAY_AUTO_RESCUE, value).apply()
 
+    /** 화면이 너무 어두우면 먼저 밝게 한다. 기본으로 켜 두고, 어르신이 싫다고 하면 이 기기에서 끈다. */
+    var autoBrightness: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_BRIGHTNESS, true)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_BRIGHTNESS, value).apply()
+
+    /** 첫 설정을 마쳤는지. 마친 뒤에는 앱을 열면 가족 리포트로 바로 간다. */
+    var setupDone: Boolean
+        get() = prefs.getBoolean(KEY_SETUP_DONE, false)
+        set(value) = prefs.edit().putBoolean(KEY_SETUP_DONE, value).apply()
+
+    /** 가족 연결 화면에 적은 번호들. MVP는 서버가 없어 기기 안에만 둔다. */
+    var familyPhones: List<String>
+        get() = prefs.getString(KEY_FAMILY_PHONE, "").orEmpty().split("\n").filter { it.isNotBlank() }
+        set(value) = prefs.edit().putString(KEY_FAMILY_PHONE, value.map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n")).apply()
+
     var preferredBrightness: Int?
         get() = prefs.getInt(KEY_PREFERRED_BRIGHTNESS, -1).takeIf { it in 1..255 }
         set(value) {
@@ -56,6 +71,9 @@ class MergoSettings(context: Context) : SettingsSource {
         const val KEY_WAKE_WORD = "wake_word"
         const val KEY_AUTO_EXECUTE = "auto_execute"
         const val KEY_DISPLAY_AUTO_RESCUE = "display_auto_rescue"
+        const val KEY_AUTO_BRIGHTNESS = "auto_brightness"
+        const val KEY_SETUP_DONE = "setup_done"
+        const val KEY_FAMILY_PHONE = "family_phone"
         const val KEY_PREFERRED_BRIGHTNESS = "preferred_brightness"
         const val KEY_PREFERRED_FONT_SCALE = "preferred_font_scale"
         const val DEFAULT_WAKE_WORD = "머고야"

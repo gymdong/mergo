@@ -10,6 +10,30 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DisplaySettingsTest {
+    @Test
+    fun `밝기가 50 밑이면 자동 밝기여도 너무 어둡다고 본다`() {
+        assertTrue(AutoBrightness.isTooDark(DisplaySnapshot(49, false, 1f)))
+        assertTrue(AutoBrightness.isTooDark(DisplaySnapshot(10, true, 1f)))
+        assertFalse(AutoBrightness.isTooDark(DisplaySnapshot(50, true, 1f)))
+        assertFalse(AutoBrightness.isTooDark(DisplaySnapshot(null, false, 1f)))
+    }
+
+    @Test
+    fun `정해진 밝기를 받으면 그 값으로 맞춘다`() = runTest {
+        val display = FakeDisplay(DisplaySnapshot(30, false, 1f))
+        val level = mapOf("level" to AutoBrightness.COMFORT.toString())
+        assertEquals(RecipeOutcome.Verified(), BrightenScreen(display) { 170 }.run(level))
+        assertEquals(AutoBrightness.COMFORT, display.state.brightness)
+    }
+
+    @Test
+    fun `자동 밝기 때문에 어두워졌으면 밝게 하면서 자동 밝기를 끈다`() = runTest {
+        val display = FakeDisplay(DisplaySnapshot(30, true, 1f))
+        val level = mapOf("level" to AutoBrightness.COMFORT.toString())
+        assertEquals(RecipeOutcome.Verified(), BrightenScreen(display) { null }.run(level))
+        assertEquals(false, display.state.automaticBrightness)
+    }
+
     private class FakeDisplay(
         var state: DisplaySnapshot,
         var allowed: Boolean = true,

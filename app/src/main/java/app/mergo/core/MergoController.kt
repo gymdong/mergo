@@ -217,6 +217,7 @@ class MergoController(
     private suspend fun execute(
         recipeId: String, params: Map<String, String>, situation: String,
         quiet: Boolean = false, announceQuiet: Boolean = false,
+        afterQuiet: (suspend () -> Unit)? = null,
     ) {
         val recipe = recipes[recipeId]
         val started = clock.now()
@@ -246,12 +247,12 @@ class MergoController(
             is RecipeOutcome.Verified -> {
                 overlay.done(text.done, "이제 편하게 이어서 보세요.")
                 if (quiet) {
-                    if (announceQuiet) voice.speak(text.done)
+                    if (afterQuiet != null) afterQuiet() else if (announceQuiet) voice.speak(text.done)
                     return record(resolved = true, summary = text.log)
                 }
                 voice.speak(text.done)
                 // 시안 05: 원래 상태가 맞는지 한 번 더 묻는다. 머고가 이미 확인했으므로 무응답은 맞는 것으로 본다(어르신 터치 1회 목표 유지).
-                val right = if (settings.autoExecute) YesNo.YES else confirm(DONE_CHECK, DONE_CHECK_TIMEOUT_MS)
+                val right = if (settings.autoExecute) YesNo.YES else confirm(doneCheck(recipeId), DONE_CHECK_TIMEOUT_MS)
                 if (right != YesNo.NO) return record(resolved = true, summary = text.log)
                 // 머고는 맞다고 확인했는데 사용자는 아니라고 했다. 목표 자체를 잘못 골랐다는 신호라 따로 남긴다.
                 label = "verified_rejected"
@@ -273,7 +274,7 @@ class MergoController(
                     YesNo.NONE
                 } else {
                     voice.speak("제대로 됐는지 봐 주세요")
-                    confirm(DONE_CHECK, DONE_CHECK_TIMEOUT_MS)
+                    confirm(doneCheck(recipeId), DONE_CHECK_TIMEOUT_MS)
                 }
                 if (right == YesNo.YES) return record(resolved = true, summary = text.log)
                 if (right == YesNo.NONE) return record(resolved = false, summary = UNCHECKED_LOG)
@@ -450,19 +451,42 @@ class MergoController(
     /** 가족이 미리 허용한 경우에만, 급격히 낮아진 시각 설정을 먼저 복구한다. */
     fun launchAutomaticDisplayRescue(recipeId: String, stillNeeded: () -> Boolean = { true }): Job = scope.launch {
         if (recipeId !in DISPLAY_RECIPES) return@launch
-        // 감지 이벤트는 한 번뿐일 수 있다. 다른 도움 대화 중이라고 복구 신호를 버리지 않는다.
+        whenFree(stillNeeded) {
+            execute(recipeId, mapOf("restore" to "true"), "시각 설정 자동 복구", quiet = true, announceQuiet = true)
+        }
+    }
+
+    /**
+     * 화면이 너무 어두우면 묻지 않고 먼저 [level]로 밝게 한 뒤 어떤지 묻는다. 싫다고 하면 [onDeclined]로 이 기능을 끈다.
+     * 답이 없으면 못 봤을 수 있으니 그대로 둔다.
+     */
+    fun launchAutomaticBrightness(level: Int, stillNeeded: () -> Boolean, onDeclined: () -> Unit): Job = scope.launch {
+        whenFree(stillNeeded) {
+            val params = mapOf("level" to level.toString())
+            execute(RecipeIds.BRIGHTEN_SCREEN, params, "화면이 너무 어두웠어요", quiet = true, announceQuiet = true) {
+                if (confirm(AUTO_BRIGHTNESS_CHECK) == YesNo.NO) {
+                    onDeclined()
+                    voice.speak("알겠어요. 앞으로는 밝기를 그대로 둘게요.")
+                }
+            }
+        }
+    }
+
+    /** 감지 이벤트는 한 번뿐일 수 있다. 다른 도움 대화 중이라고 복구 신호를 버리지 않고 끝나기를 기다린다. */
+    private suspend fun whenFree(stillNeeded: () -> Boolean, block: suspend () -> Unit) {
         withTimeoutOrNull(AUTO_RESCUE_WAIT_MS) {
             while (!busy.compareAndSet(false, true)) delay(250)
-        } ?: return@launch
+        } ?: return
         detector.suggestionShowing = true
         try {
-            if (!stillNeeded()) return@launch
-            execute(recipeId, mapOf("restore" to "true"), "시각 설정 자동 복구", quiet = true, announceQuiet = true)
+            if (stillNeeded()) block()
         } finally {
             detector.suggestionShowing = false
             busy.set(false)
         }
     }
+
+    private fun doneCheck(recipeId: String) = if (recipeId == RecipeIds.BRIGHTEN_SCREEN) BRIGHTNESS_CHECK else DONE_CHECK
 
     companion object {
         const val BUBBLE_TIMEOUT_MS = 15_000L
@@ -470,6 +494,8 @@ class MergoController(
         const val DONE_CHECK_TIMEOUT_MS = 10_000L
         const val AUTO_RESCUE_WAIT_MS = 60_000L
         val DONE_CHECK = Prompt("이 화면이 맞나요?", yes = "응, 맞아", no = "아니")
+        val BRIGHTNESS_CHECK = Prompt("이 밝기 괜찮으세요?", yes = "응, 좋아", no = "아니")
+        val AUTO_BRIGHTNESS_CHECK = Prompt("너무 어두워서 밝게 만들었어요.", "어때요?", yes = "좋아", no = "싫어")
         const val UNCHECKED_LOG = "해결됐는지 확인하지 못했어요"
         const val THINKING = "살펴보고 있어요"
         const val SENSITIVE_RECIPE = "sensitive_screen"
