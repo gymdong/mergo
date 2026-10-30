@@ -12,6 +12,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -246,15 +247,14 @@ class OverlayUi(
         }
         // 잘못 눌러 열었을 때 바로 빠져나갈 수 있게, 닫기도 테두리가 보이는 큰 버튼으로 둔다.
         box.addView(secondaryButton("괜찮아요, 닫을게요", LIME, LIME) { removeSheet(); onPick(null) }, buttonLp(false))
-        // 패널 바깥을 누르면(하던 일을 계속하려는 것) 닫는다.
-        box.setOnTouchListener { _, e ->
-            if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) {
-                removeSheet()
-                onPick(null)
-            }
-            false
+        // 패널 바깥은 어둡게 덮는다. 바깥을 누르면 닫기만 하고, 그 터치가 아래 앱을 누르지 않게 한다.
+        box.isClickable = true
+        val scrim = FrameLayout(service).apply {
+            setBackgroundColor(SCRIM)
+            setOnClickListener { removeSheet(); onPick(null) }
+            addView(box, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
         }
-        addSheet(box, watchOutside = true)
+        addSheet(scrim, fullScreen = true)
     }
 
     private fun sheetContainer(bg: Int) = LinearLayout(service).apply {
@@ -267,10 +267,9 @@ class OverlayUi(
         elevation = dp(12).toFloat()
     }
 
-    private fun addSheet(v: View, watchOutside: Boolean = false) {
-        val lp = params(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM)
-        if (watchOutside) lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
-        wm.addView(v, lp)
+    private fun addSheet(v: View, fullScreen: Boolean = false) {
+        val h = if (fullScreen) WindowManager.LayoutParams.MATCH_PARENT else WindowManager.LayoutParams.WRAP_CONTENT
+        wm.addView(v, params(WindowManager.LayoutParams.MATCH_PARENT, h, Gravity.BOTTOM))
         sheet = v
     }
 
@@ -354,5 +353,6 @@ class OverlayUi(
         val MUTED = Color.parseColor("#5B6B63")
         val BG_LIGHT = Color.parseColor("#F7F8F4")
         val OUTLINE = Color.parseColor("#A8B5AE")
+        val SCRIM = Color.parseColor("#66000000")
     }
 }
