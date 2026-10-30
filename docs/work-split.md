@@ -18,7 +18,7 @@
 
 ## 0단계 · 함께 (첫 45분) — 계약 확정과 뼈대
 
-1. **A**: Gradle 프로젝트 뼈대를 만든다(Wrapper, `app` 모듈, minSdk 29, target 36, `local.properties`는 gitignore). `main`에 push한다.
+1. **A**: Gradle 프로젝트 뼈대를 만든다(Wrapper, `app` 모듈, minSdk 29, target 36, `local.properties`는 gitignore). `dev`에 PR로 올린다.
 2. **계약 (확정, `feat/device`에서 작성)**: `app/src/main/java/app/mergo/model/`가 기준이다. 아래는 요약이며, 이후 변경은 반드시 상대에게 알린다.
 
 | 파일 | 내용 | 구현 | 사용 |
