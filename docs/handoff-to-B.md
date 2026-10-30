@@ -1,5 +1,7 @@
 # B(AI 담당) 인계 — 2026-10-30 기준
 
+> **갱신:** 병합 후 A의 변경(유예 듣기 삭제, 복구 결과 4분류, 이름으로 앱 열기)은 [`handoff-to-B-post-merge.md`](./handoff-to-B-post-merge.md)를 먼저 본다.
+
 A(기기 담당) 작업은 `dev` 브랜치에 병합되어 있다(PR #1). **브랜치 규칙: 작업은 `dev`에서 따고 `dev`로 PR, `main`에는 최종본만 올린다.** 이 문서는 B가 바로 작업을 시작하는 데 필요한 것만 담는다.
 - 스펙: [`mergo-mvp-spec.md`](./mergo-mvp-spec.md)
 - 분담: [`work-split.md`](./work-split.md)
