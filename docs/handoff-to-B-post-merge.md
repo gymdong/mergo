@@ -58,7 +58,12 @@
 
 `ai/AndroidVoiceIO.kt` 등 음성 파일은 건드리지 않았다. `BrainUtteranceSetTest`(AC-B5 발화 정답률)는 그대로 통과한다.
 
-## 6. B가 확인하거나 정해 줄 것
+## 6. 그 뒤 A가 더 바꾼 것 (참고)
+
+- **민감 화면:** `onHelp`는 시작할 때 `core/SensitiveScreen`으로 스토어·설치·권한 화면이나 카드번호·비밀번호를 묻는 화면인지 본다. 해당하면 Brain을 부르지 않고 "여기서는 누르지 않을게요"만 안내한다. 호출어 경로도 같다.
+- **인터넷 레시피 등록**, **볼륨 정상일 때 set_volume 막기**는 아래 표에 반영했다.
+
+## 7. B가 확인하거나 정해 줄 것
 
 1. ~~**`open_internet_panel` 미등록.**~~ A가 구현·등록했다(`OpenInternetPanel`). 시스템 인터넷 창의 `apm_button`·`wifi_toggle`을 viewId로 찾는다.
 2. ~~**"소리가 안 나" + 볼륨 정상.**~~ A가 고쳤다. 볼륨이 0이거나 줄어든 경우에만 `set_volume` 후보가 되고, 아니면 "소리는 켜져 있어요…" 안내(`KeywordRules.soundButAudible`, `MergoBrain.soundIsOn`).

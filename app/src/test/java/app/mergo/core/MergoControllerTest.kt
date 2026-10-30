@@ -321,6 +321,35 @@ class MergoControllerTest {
     }
 
     @Test
+    fun `스토어 화면에서 도와줘를 부르면 아무것도 누르지 않고 빠져나오는 법만 알려 준다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES, choice = "이거 안 꺼져"))
+        env.controller.onScreenEvent(ScreenEvent(0, "com.android.vending", null, listOf("설치"), false, EventKind.WINDOW_CHANGED))
+        env.controller.onHelp()
+        assertEquals(listOf("여기서는 누르지 않을게요"), env.overlay.asked)
+        assertTrue(env.brainCalls.isEmpty() && env.recipe.calls.isEmpty())
+        val log = env.familyLog.all().single()
+        assertEquals("guided", log.outcome)
+        assertTrue(log.notified && !log.resolved)
+    }
+
+    @Test
+    fun `카드번호를 묻는 웹페이지에서도 누르지 않는다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = YesNo.NO, choice = "이거 안 꺼져"))
+        env.controller.onScreenEvent(ScreenEvent(0, "com.android.chrome", null, listOf("택배 주소 확인", "카드 번호 입력"), false, EventKind.WINDOW_CHANGED))
+        env.controller.onHelp("이거 뭐야")
+        assertTrue(env.brainCalls.isEmpty())
+        assertEquals(false, env.familyLog.all().single().notified)
+    }
+
+    @Test
+    fun `평범한 웹페이지면 그대로 판단한다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES, choice = "이거 안 꺼져"))
+        env.controller.onScreenEvent(ScreenEvent(0, "com.android.chrome", null, listOf("우리 동네 소식"), false, EventKind.WINDOW_CHANGED))
+        env.controller.onHelp()
+        assertEquals("이거 안 꺼져", env.brainCalls.single().utterance)
+    }
+
+    @Test
     fun `Brain이 되묻기로 답하면 실행하지 않고 말만 한다`() = runTest {
         val env = Env(
             this, overlay = FakeOverlay(choice = "오늘 날씨 어때"),
