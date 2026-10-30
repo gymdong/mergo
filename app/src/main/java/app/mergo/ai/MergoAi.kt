@@ -24,6 +24,10 @@ object MergoAi {
         )
     }
 
+    /** Gemini 키가 없으면 null이다. 이때 호출어는 꺼지고 도와줘 버튼만 쓴다. */
+    fun speechToText(): SpeechToText? = BuildConfig.GEMINI_API_KEY.takeIf { it.isNotBlank() }
+        ?.let { GeminiSpeech(it, BuildConfig.GEMINI_SPEECH_MODEL) }
+
     fun brain(voice: VoiceIO, settings: SettingsSource): Brain =
         MergoBrain(llm, voice, autoExecute = { settings.autoExecute }, log = ::log)
 

@@ -22,7 +22,7 @@ data class KeywordMatch(
 
 /** 서버 없이 도는 순수 함수 규칙. 후보가 하나면 Brain이 LLM 없이 바로 레시피를 고른다. */
 object KeywordRules {
-    private const val YOUTUBE = "com.google.android.youtube"
+    const val YOUTUBE = "com.google.android.youtube"
 
     private val OUT_OF_SCOPE = listOf(
         "날씨", "전화", "택시", "돈보내", "돈좀보내", "송금", "계좌", "결제", "비밀번호", "인증번호",
@@ -31,7 +31,7 @@ object KeywordRules {
         "안나", "안돼", "안되", "안들", "안꺼", "안닫", "왜", "와이라", "이상", "아까", "이전", "다시",
         "돌아", "뭐고", "어디", "어데", "못", "잘못", "아닌데", "아이다", "없어", "사라",
     )
-    private val CLOSE = listOf("안꺼", "안닫", "안없어", "안사라", "못끄", "우째끄", "어떻게끄", "엑스")
+    private val CLOSE = listOf("꺼져", "안꺼", "안닫", "안없어", "안사라", "못끄", "우째끄", "어떻게끄", "엑스")
     private val SKIP = listOf("건너뛰", "스킵", "넘겨")
     private val SOUND = listOf("소리", "볼륨", "음량", "무음", "안들려", "안들리")
     private val NETWORK = listOf("인터넷", "와이파이", "데이터", "연결")

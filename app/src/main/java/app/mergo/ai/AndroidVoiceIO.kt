@@ -26,7 +26,10 @@ import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
 
 /** speak()는 TTS가 끝날 때까지 기다린다. 말하는 동안 마이크가 열려 머고 목소리를 듣지 않게 하기 위해서다. */
-class AndroidVoiceIO(context: Context) : VoiceIO {
+class AndroidVoiceIO(
+    context: Context,
+    private val onMicBusy: (Boolean) -> Unit = {},
+) : VoiceIO {
     private val app = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
@@ -57,7 +60,9 @@ class AndroidVoiceIO(context: Context) : VoiceIO {
         })
     }
 
-    override suspend fun speak(text: String) {
+    override suspend fun speak(text: String) = usingMic { say(text) }
+
+    private suspend fun say(text: String) {
         val usable = withTimeoutOrNull(TTS_INIT_MS) { ready.await() } ?: false
         if (!usable) {
             Log.w(TAG, "TTS 사용 불가: $text")
@@ -84,11 +89,28 @@ class AndroidVoiceIO(context: Context) : VoiceIO {
         Log.d(TAG, "TTS ${SystemClock.elapsedRealtime() - started}ms: $text")
     }
 
-    override suspend fun listen(timeoutMs: Long): String? = withTimeoutOrNull(timeoutMs) {
-        withContext(Dispatchers.Main) { recognize() }
+    override suspend fun listen(timeoutMs: Long): String? = usingMic {
+        withTimeoutOrNull(timeoutMs) {
+            withContext(Dispatchers.Main) { recognize() }
+        }
     }
 
-    override suspend fun listenYesNo(timeoutMs: Long): YesNo = YesNoParser.parse(listen(timeoutMs))
+    /** 유예 듣기가 마이크를 내려놓게 한다. 머고 목소리를 듣지 않고, SpeechRecognizer와 부딪히지도 않는다. */
+    private suspend fun <T> usingMic(block: suspend () -> T): T {
+        onMicBusy(true)
+        try {
+            return block()
+        } finally {
+            onMicBusy(false)
+        }
+    }
+
+    override suspend fun listenYesNo(timeoutMs: Long): YesNo {
+        val said = listen(timeoutMs)
+        val answer = YesNoParser.parse(said)
+        Log.d(TAG, "음성 답변 '$said' -> $answer")
+        return answer
+    }
 
     override fun cancelListening() {
         main.post { recognizer?.let(::release) }

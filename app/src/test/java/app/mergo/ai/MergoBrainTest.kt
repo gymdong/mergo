@@ -232,6 +232,29 @@ class MergoBrainTest {
     }
 
     @Test
+    fun `유튜브 밖에서 건너뛰기를 고르면 화면 조작으로 바꾼다`() = runTest {
+        val reply = """{"diagnosis": "광고", "recipe": "skip_ad", "params": {}, "say": "닫을까요?", "confirm": true}"""
+        fun at(pkg: String, ad: Boolean) =
+            BrainContext("이게 왜 이래", emptyList(), emptyList(), Baseline(pkg, null, 8, true, 0), ad)
+
+        val chrome = MergoBrain(ScriptedLlm(replies = listOf(reply)), RecordingVoice()).decide(at("com.android.chrome", false))
+        assertEquals(RecipeIds.SCREEN_AGENT, chrome.recipe)
+        assertEquals("광고 닫기", chrome.params["goal"])
+
+        val youtube = MergoBrain(ScriptedLlm(replies = listOf(reply)), RecordingVoice())
+            .decide(at(KeywordRules.YOUTUBE, true))
+        assertEquals(RecipeIds.SKIP_AD, youtube.recipe)
+    }
+
+    @Test
+    fun `꺼져라고만 해도 화면 조작을 고른다`() = runTest {
+        val llm = ScriptedLlm()
+        val decision = MergoBrain(llm, RecordingVoice()).decide(ctx("이것 좀 꺼져"))
+        assertEquals(RecipeIds.SCREEN_AGENT, decision.recipe)
+        assertEquals(0, llm.calls)
+    }
+
+    @Test
     fun `금지 발화는 LLM에 묻지 않고 바로 ask로 답한다`() = runTest {
         val llm = ScriptedLlm(replies = listOf(goodReply))
         val decision = MergoBrain(llm, RecordingVoice()).decide(ctx("아까 그 돈 보내 줘"))
