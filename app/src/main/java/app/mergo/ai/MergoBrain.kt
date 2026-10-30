@@ -3,9 +3,11 @@ package app.mergo.ai
 import app.mergo.model.Brain
 import app.mergo.model.BrainContext
 import app.mergo.model.BrainDecision
+import app.mergo.model.KnownApps
 import app.mergo.model.RecipeIds
 import app.mergo.model.VoiceIO
 import app.mergo.model.YesNo
+import app.mergo.recipe.SOUND_IS_ON
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -23,7 +25,12 @@ class MergoBrain(
         val match = KeywordRules.match(ctx)
         log("brain keyword candidates=${match.candidates} outOfScope=${match.outOfScope}")
         if (match.outOfScope) return outOfScope()
-        match.candidates.singleOrNull()?.let { return decisionFor(it, ctx) }
+        if (match.soundButAudible && match.candidates.isEmpty()) return soundIsOn()
+        match.candidates.singleOrNull()?.let { recipe ->
+            val decision = decisionFor(recipe, ctx)
+            // "소리도 안 나고 인터넷도 안 돼"처럼 함께 말한 소리 문제를 버리지 않는다.
+            return if (match.soundButAudible) decision.copy(say = "소리는 켜져 있어요. ${decision.say}") else decision
+        }
 
         val fromLlm = askLlm(ctx)?.let { guard(it, ctx, match) }?.let { fitToScreen(it, ctx) }
         log("brain llm decision=$fromLlm")
@@ -57,7 +64,27 @@ class MergoBrain(
      */
     private fun guard(decision: BrainDecision, ctx: BrainContext, match: KeywordMatch): BrainDecision {
         val noEvidence = match.candidates.isEmpty() && ctx.diff.isEmpty() && !match.hasTroubleSignal
-        return if (noEvidence) outOfScope() else decision
+        if (noEvidence) return outOfScope()
+        if (decision.recipe == RecipeIds.OPEN_PREVIOUS_APP) return guardOpenApp(decision)
+        // 볼륨이 켜져 있고 줄어들지도 않았으면 볼륨을 '되돌려도' 아무것도 바뀌지 않는다. 고친 척하지 않는다.
+        val volumeUnchanged = ctx.diff.none { it.startsWith(DiffPrefix.VOLUME) }
+        if (decision.recipe == RecipeIds.SET_VOLUME && ctx.current.volume > 0 && volumeUnchanged) return soundIsOn()
+        return decision
+    }
+
+    /**
+     * 앱은 허용 목록의 이름으로만 연다. LLM이 패키지를 직접 고르지 못하게 pkg는 버린다.
+     * 목록에 없는 앱을 골랐으면 직전 앱으로 바꿔 열지 않고 못 한다고 말한다("토스를 열까요?" 뒤에 엉뚱한 앱이 열리지 않게).
+     * 말도 LLM 문장 대신 정해진 문장을 쓴다.
+     */
+    private fun guardOpenApp(decision: BrainDecision): BrainDecision {
+        val appId = decision.params["app"]?.takeIf { it.isNotBlank() }
+        val app = appId?.let { KnownApps.byId(it) ?: return cannotOpen() }
+        val say = app?.let { Say("${it.obj} 열까요?", "${it.obj} 열게요.") } ?: SAY.getValue(RecipeIds.OPEN_PREVIOUS_APP)
+        return decision.copy(
+            params = app?.let { mapOf("app" to it.id) }.orEmpty(),
+            say = if (autoExecute()) say.statement else say.question,
+        )
     }
 
     /** 건너뛰기는 YouTube 광고 전용이다. 다른 앱의 광고는 화면을 보고 닫아야 한다. */
@@ -70,9 +97,10 @@ class MergoBrain(
     /** F9: 가능성이 높은 후보부터 예/아니오로 최대 2번 묻는다. */
     private suspend fun askCandidates(candidates: List<String>, ctx: BrainContext): BrainDecision {
         for (recipe in candidates.take(MAX_QUESTIONS)) {
-            voice.speak(SAY.getValue(recipe).question)
+            val say = sayFor(recipe, ctx)
+            voice.speak(say.question)
             if (voice.listenYesNo() == YesNo.YES) {
-                return decisionFor(recipe, ctx).copy(confirm = false, say = SAY.getValue(recipe).statement)
+                return decisionFor(recipe, ctx).copy(confirm = false, say = say.statement)
             }
         }
         return fallbackAsk()
@@ -80,7 +108,7 @@ class MergoBrain(
 
     private fun decisionFor(recipe: String, ctx: BrainContext): BrainDecision {
         val auto = autoExecute()
-        val say = SAY.getValue(recipe)
+        val say = sayFor(recipe, ctx)
         return BrainDecision(
             diagnosis = "키워드 규칙",
             recipe = recipe,
@@ -93,7 +121,16 @@ class MergoBrain(
     private fun paramsFor(recipe: String, ctx: BrainContext): Map<String, String> = when (recipe) {
         RecipeIds.SCREEN_AGENT -> mapOf("goal" to "광고 닫기")
         RecipeIds.RESTORE_VIDEO -> previousTitle(ctx)?.let { mapOf("title" to it) }.orEmpty()
+        RecipeIds.OPEN_PREVIOUS_APP -> namedApp(ctx)?.let { mapOf("app" to it.id) }.orEmpty()
         else -> emptyMap()
+    }
+
+    private fun namedApp(ctx: BrainContext): KnownApps.App? =
+        KeywordRules.openApp(KeywordRules.normalize(ctx.utterance.orEmpty()))
+
+    private fun sayFor(recipe: String, ctx: BrainContext): Say {
+        val app = if (recipe == RecipeIds.OPEN_PREVIOUS_APP) namedApp(ctx) else null
+        return app?.let { Say("${it.obj} 열까요?", "${it.obj} 열게요.") } ?: SAY.getValue(recipe)
     }
 
     private fun previousTitle(ctx: BrainContext): String? = ctx.diff
@@ -108,6 +145,22 @@ class MergoBrain(
         recipe = RecipeIds.ASK,
         params = emptyMap(),
         say = "그건 제가 해 드리기 어려워요. 화면에 문제가 있으신가요?",
+        confirm = false,
+    )
+
+    private fun soundIsOn() = BrainDecision(
+        diagnosis = "볼륨은 켜져 있음",
+        recipe = RecipeIds.ASK,
+        params = emptyMap(),
+        say = SOUND_IS_ON,
+        confirm = false,
+    )
+
+    private fun cannotOpen() = BrainDecision(
+        diagnosis = "허용 목록에 없는 앱",
+        recipe = RecipeIds.ASK,
+        params = emptyMap(),
+        say = "그 앱은 제가 열어 드리기 어려워요.",
         confirm = false,
     )
 

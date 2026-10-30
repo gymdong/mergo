@@ -23,6 +23,7 @@ class StuckDetector(
     private var lastUserActionTs = Long.MIN_VALUE / 2
     private var lastCountdownTs = Long.MIN_VALUE / 2
     private val backPresses = ArrayDeque<Long>()
+    private val clicks = ArrayDeque<Long>()
 
     private var ytTitle: String? = null
     private var lastTitleChangeTs = Long.MIN_VALUE / 2
@@ -32,18 +33,22 @@ class StuckDetector(
     private data class PendingR1(val prevTitle: String, val changedAt: Long)
     private data class PendingR2(val prevPkg: String, val leftAt: Long)
     private data class R3Window(val prevTitle: String, val changedAt: Long)
+    private data class PendingLink(val fromPkg: String, val toPkg: String, val leftAt: Long)
 
     private var pendingR1: PendingR1? = null
     private var pendingR2: PendingR2? = null
     private var r3: R3Window? = null
+    private var pendingLink: PendingLink? = null
     private var quietUntil = Long.MIN_VALUE / 2
 
-    /** 영상이 바뀐 뒤 말로 되돌릴 수 있는 유예 창. 대상은 정상 상태 영상이다. */
-    data class Grace(val target: String, val mode: String, val until: Long)
-    private var grace: Grace? = null
     private var adFirstSeen: Long? = null
     private var adLastSeen = Long.MIN_VALUE / 2
     private var adSuggested = false
+
+    /** 자동 제안에 답이 없으면 사용자가 다시 움직일 때까지 제안하지 않는다. 영상을 틀어 둔 채 잠들면 자동재생마다 깨우게 된다. */
+    private var pausedUntilUserAction = false
+    /** 사용자가 마지막으로 있다는 걸 보인 시각. 화면 동작과 직접 호출을 함께 센다. */
+    private var lastUserPresentTs = Long.MIN_VALUE / 2
 
     /** 말풍선이 떠 있는 동안에는 새 제안을 내지 않는다(한 번에 하나). */
     @Volatile
@@ -54,10 +59,18 @@ class StuckDetector(
         val out = mutableListOf<Suggestion>()
         if (e.pkg in config.ignoredPkgs) return out
         val user = isUserSignal(e)
-        if (user) lastUserActionTs = e.ts
+        if (user) {
+            lastUserActionTs = e.ts
+            lastUserPresentTs = e.ts
+            pausedUntilUserAction = false
+        }
         if (e.kind == EventKind.BACK) {
             backPresses.addLast(e.ts)
             while (backPresses.size > 5) backPresses.removeFirst()
+        }
+        if (user && e.kind == EventKind.CLICK) {
+            clicks.addLast(e.ts)
+            while (clicks.size > 5) clicks.removeFirst()
         }
         if (Marker.AUTOPLAY_COUNTDOWN in e.markers) lastCountdownTs = e.ts
         trackAd(e)
@@ -79,10 +92,11 @@ class StuckDetector(
             }
         }
 
-        // R3: 오조작 후 혼란 신호 — 뒤로 가기 연타
+        // R3: 오조작 후 혼란 신호 — 뒤로 가기 연타 또는 여기저기 연달아 누름
         r3?.let { w ->
             val recentBacks = backPresses.count { it >= e.ts - config.r3BackWithinMs && it >= w.changedAt }
-            if (recentBacks >= config.r3BackCount) {
+            val recentClicks = clicks.count { it >= e.ts - config.r3ClickWithinMs && it > w.changedAt }
+            if (recentBacks >= config.r3BackCount || recentClicks >= config.r3ClickCount) {
                 emit(out, Suggestion.restoreVideo(RuleId.R3_MISTOUCH, w.prevTitle, "mistouch", e.ts))
                 r3 = null
                 pendingR2 = null
@@ -108,12 +122,22 @@ class StuckDetector(
                 val s = Suggestion(
                     RuleId.R2_HOME_EXIT, it.prevPkg, RecipeIds.OPEN_PREVIOUS_APP,
                     mapOf("pkg" to it.prevPkg), "아까 보시던 유튜브로 돌아갈까요?", now,
-                    headline = "홈 화면으로 나왔어요", yesLabel = "예, 돌아가 주세요",
+                    headline = "홈 화면으로 나왔어요", yesLabel = "응, 돌아가 줘",
                 )
                 if (emit(out, s) != Emit.DEFERRED) pendingR2 = null
             }
         }
         r3?.let { if (now - it.changedAt > config.r3WindowMs) r3 = null }
+        pendingLink?.let {
+            if (now - it.leftAt >= config.linkWaitMs) {
+                val s = Suggestion(
+                    RuleId.R5_LINK_EXIT, it.toPkg, RecipeIds.OPEN_PREVIOUS_APP,
+                    mapOf("pkg" to it.fromPkg, "via" to "back"), "보던 화면으로 돌아갈까요?", now,
+                    headline = "다른 화면이 열렸어요", yesLabel = "응, 돌아가 줘", noLabel = "아니, 이거 볼래",
+                )
+                if (emit(out, s) != Emit.DEFERRED) pendingLink = null
+            }
+        }
         val first = adFirstSeen
         if (first != null && !adSuggested) {
             if (now - adLastSeen > config.r4GoneMs) {
@@ -122,7 +146,7 @@ class StuckDetector(
                 val s = Suggestion(
                     RuleId.R4_AD_SKIP, "ad:${ytTitle ?: "-"}", RecipeIds.SKIP_AD, emptyMap(),
                     "광고 넘길까요?", now, headline = "광고가 나오고 있어요",
-                    yesLabel = "예, 넘겨 주세요", noLabel = "아니요, 볼게요",
+                    yesLabel = "응, 넘겨 줘", noLabel = "아니, 볼래", askFirst = !config.autoSkipAds,
                 )
                 if (emit(out, s) != Emit.DEFERRED) adSuggested = true
             }
@@ -140,25 +164,31 @@ class StuckDetector(
         quietUntil = now + quietMs
     }
 
-    /** 지금 열려 있는 유예 창. 시간이 지났거나 이미 정상 상태 영상으로 돌아왔으면 null. */
+    /**
+     * 제안에 답이 없을 때 부른다. 말풍선을 띄운 [since] 뒤로 사용자가 움직인 적이 없을 때만,
+     * 사용자 동작이나 [resumeSuggestions]가 오기 전까지 새 제안을 내지 않는다.
+     */
     @Synchronized
-    fun grace(now: Long = clock.now()): Grace? {
-        val g = grace ?: return null
-        if (now > g.until || ytTitle == g.target) {
-            grace = null
-            return null
-        }
-        return g
+    fun pauseIfNoUserSince(since: Long) {
+        pausedUntilUserAction = lastUserPresentTs < since
+    }
+
+    /** 사용자가 머고를 직접 불렀을 때처럼, 화면 이벤트 밖에서 사용자가 있다는 것을 알았을 때 부른다. */
+    @Synchronized
+    fun resumeSuggestions(now: Long = clock.now()) {
+        lastUserPresentTs = now
+        pausedUntilUserAction = false
     }
 
     /** 진행 중이던 판단을 모두 비운다. */
     @Synchronized
     fun reset() {
-        grace = null
         pendingR1 = null
         pendingR2 = null
         r3 = null
+        pendingLink = null
         backPresses.clear()
+        clicks.clear()
     }
 
     private fun onTitleChanged(prev: String, new: String, ts: Long) {
@@ -170,12 +200,9 @@ class StuckDetector(
         // 에뮬레이터 확인(2026-10-30): YouTube 플레이어 탭은 클릭 이벤트가 오지 않는다. 그래서 '터치가 있었다'는 증거로
         // 쓸 수 없고, 카운트다운이 있으면 자동재생, 없으면 사용자가 바꾼 것으로 본다.
         val autoplay = if (config.requireCountdown) countdownSeen && noTouch else noTouch
-        if (baseline != null && baseline != new) {
-            grace = Grace(baseline, if (autoplay) "autoplay" else "mistouch", ts + config.graceMs)
-        }
         if (autoplay) {
             // R1: 이전 영상이 정상 상태(30초 이상 본 영상)여야 한다.
-            if (baseline != null && baseline == prev) pendingR1 = PendingR1(prev, ts)
+            if (config.suggestAutoplay && baseline != null && baseline == prev) pendingR1 = PendingR1(prev, ts)
         } else {
             // R3: 사용자가 바꿨다. 이 시점에는 개입하지 않고 30초 동안 혼란 신호를 지켜본다.
             val target = baseline ?: return
@@ -191,6 +218,14 @@ class StuckDetector(
         val prev = foregroundPkg
         if (pkg == prev) return
         foregroundPkg = pkg
+        // R5: 유튜브 같은 앱에서 누른 직후 브라우저·스토어로 넘어감. 다른 곳으로 또 옮기면(돌아오면) 취소한다.
+        pendingLink = if (prev in config.linkSourcePkgs && pkg in config.linkTargetPkgs &&
+            ts - lastUserActionTs <= config.linkTouchWithinMs
+        ) {
+            PendingLink(prev!!, pkg, ts)
+        } else {
+            null
+        }
         if (isLauncher) {
             val w = r3
             // 보던 영상이 이미 정상 상태 영상이면 오조작이 아니라 그냥 홈으로 나간 것(R2)이다.
@@ -228,6 +263,7 @@ class StuckDetector(
 
     private fun emit(out: MutableList<Suggestion>, s: Suggestion): Emit {
         if (suggestionShowing || out.isNotEmpty()) return Emit.DEFERRED
+        if (pausedUntilUserAction) return Emit.BLOCKED
         if (cooldown.isBlocked(s.rule, s.target, s.createdAt)) return Emit.BLOCKED
         out += s
         return Emit.EMITTED

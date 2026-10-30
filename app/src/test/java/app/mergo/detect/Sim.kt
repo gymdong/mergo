@@ -11,7 +11,7 @@ const val LAUNCHER = "com.google.android.apps.nexuslauncher"
 const val SETTINGS = "com.android.settings"
 
 /** 감지기와 정상 상태 저장소에 이벤트를 시간 순서대로 넣고, 그 사이를 1초 단위 tick으로 채우는 재생기. */
-class Sim(config: DetectorConfig = DetectorConfig(launcherPkgs = setOf(LAUNCHER))) {
+class Sim(config: DetectorConfig = DetectorConfig(launcherPkgs = setOf(LAUNCHER), suggestAutoplay = true)) {
     var now = 0L
         private set
     private val clock = Clock { now }

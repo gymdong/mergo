@@ -10,12 +10,13 @@ import app.mergo.memory.TimelineBuffer
 import app.mergo.model.Baseline
 import app.mergo.model.Brain
 import app.mergo.model.BrainContext
+import app.mergo.model.BrainDecision
 import app.mergo.model.Clock
-import app.mergo.model.GraceListener
-import app.mergo.model.GracePhrases
+import app.mergo.model.FailReason
 import app.mergo.model.Marker
 import app.mergo.model.Recipe
 import app.mergo.model.RecipeIds
+import app.mergo.model.RecipeOutcome
 import app.mergo.model.ScreenEvent
 import app.mergo.model.SettingsSource
 import app.mergo.model.VoiceIO
@@ -50,10 +51,8 @@ class MergoController(
     private val familyLog: FamilyLog,
     private val liveVolume: () -> Int,
     private val liveOnline: () -> Boolean,
-    private val grace: GraceListener,
+    private val liveScreen: () -> LiveScreen = { LiveScreen(null, emptyList()) },
 ) {
-    private var openGrace: StuckDetector.Grace? = null
-
     private val busy = AtomicBoolean(false)
 
     @Volatile
@@ -82,40 +81,6 @@ class MergoController(
         val now = clock.now()
         baseline.tick(now)
         handle(detector.tick(now))
-        syncGrace(now)
-    }
-
-    /** 감지기의 유예 창 상태에 맞춰 듣기를 열고 닫는다. */
-    private fun syncGrace(now: Long) {
-        val g = if (automating) null else detector.grace(now)
-        if (g == openGrace) return
-        openGrace = g
-        if (g == null) {
-            grace.close()
-        } else {
-            log("유예 듣기 열림 ${g.mode} target=${g.target} ${g.until - now}ms")
-            grace.open(g.until - now) { heard -> scope.launch { onGraceHeard(heard) } }
-        }
-    }
-
-    /** 유예 창에서 '잘못 눌렀다' 같은 말을 들으면 확인 없이 바로 이전 영상으로 되돌린다. */
-    suspend fun onGraceHeard(heard: String) {
-        val g = detector.grace(clock.now()) ?: return
-        if (!GracePhrases.matches(heard)) {
-            log("유예 듣기: 해당 없는 말 '$heard'")
-            return
-        }
-        if (!busy.compareAndSet(false, true)) return
-        detector.suggestionShowing = true
-        try {
-            log("유예 듣기: '$heard' → ${g.target}")
-            grace.close()
-            openGrace = null
-            execute(RecipeIds.RESTORE_VIDEO, mapOf("title" to g.target, "mode" to g.mode), heard)
-        } finally {
-            detector.suggestionShowing = false
-            busy.set(false)
-        }
     }
 
     private fun handle(suggestions: List<Suggestion>) {
@@ -129,18 +94,22 @@ class MergoController(
     suspend fun onSuggestion(s: Suggestion) {
         if (!busy.compareAndSet(false, true)) return
         detector.suggestionShowing = true
+        val shownAt = clock.now()
         try {
             log("제안 ${s.rule} target=${s.target} recipe=${s.recipeId} params=${s.params}")
             val prompt = Prompt(s.headline, s.say, eyebrow = "머고가 알아챘어요", yes = s.yesLabel, no = s.noLabel)
-            val answer = if (settings.autoExecute) YesNo.YES else confirm(prompt)
+            val answer = if (settings.autoExecute || !s.askFirst) YesNo.YES else confirm(prompt)
             log("응답 ${s.rule}: $answer")
             if (answer == YesNo.YES) {
-                execute(s.recipeId, s.params, s.say)
+                execute(s.recipeId, s.params, s.say, quiet = !s.askFirst)
             } else {
                 // 거절이나 무응답: 같은 대상에는 다시 제안하지 않고, 지금 상태를 정상 상태로 인정한다.
                 cooldown.reject(s.rule, s.target, clock.now())
                 baseline.acceptCurrent(clock.now())
                 if (answer == YesNo.NO) voice.speak("알겠어요")
+                // 무응답은 못 들었거나 자는 중일 수 있다. 말풍선이 떠 있는 동안에도 움직임이 없었으면
+                // 사용자가 다시 움직일 때까지 자동 제안을 멈춘다.
+                if (answer == YesNo.NONE) detector.pauseIfNoUserSince(shownAt)
             }
         } finally {
             detector.suggestionShowing = false
@@ -150,23 +119,47 @@ class MergoController(
 
     /** 도와줘 버튼(또는 호출어)으로 불렀을 때. [utterance]가 있으면 듣기를 건너뛴다. */
     suspend fun onHelp(utterance: String? = null) {
+        // 직접 불렀으니 사용자가 깨어 있다. 무응답으로 멈춘 자동 제안을 다시 켠다.
+        detector.resumeSuggestions()
         if (!busy.compareAndSet(false, true)) return
         detector.suggestionShowing = true
         try {
-            val said = utterance ?: askWhatHappened() ?: run {
+            val screen = liveScreen()
+            if (SensitiveScreen.matches(screen)) return guideOutOfSensitiveScreen(screen, utterance)
+            var said = utterance ?: run {
+                // 머고가 짐작 가는 게 있으면 그것 하나만 먼저 묻는다. 아니라고 하면 선택지를 보여 준다.
+                guess()?.let { g ->
+                    log("도와줘 추측: ${g.recipeId} ${g.params}")
+                    when (confirm(g.prompt)) {
+                        YesNo.YES -> return execute(g.recipeId, g.params, g.prompt.title)
+                        YesNo.NONE -> {
+                            overlay.dismiss()
+                            return
+                        }
+                        YesNo.NO -> Unit
+                    }
+                }
+                askWhatHappened()
+            } ?: run {
                 overlay.dismiss()
                 return
             }
-            log("도와줘 발화: $said")
-            val started = clock.now()
-            val decision = brain.decide(brainContext(said))
-            log("Brain ${clock.now() - started}ms: $decision")
+            var decision = decide(said)
+            // 되물었는데 대답을 받지 않으면 거기서 끝나 버린다. 그 질문으로 선택지를 한 번 더 보여 준다.
+            if (decision.recipe == RecipeIds.ASK && utterance == null) {
+                said = askWhatHappened(decision.say) ?: run {
+                    overlay.dismiss()
+                    return
+                }
+                decision = decide(said)
+            }
             if (decision.recipe == RecipeIds.ASK || decision.recipe !in recipes) {
+                overlay.notice(decision.say)
                 voice.speak(decision.say)
                 return
             }
             if (decision.confirm && !settings.autoExecute) {
-                if (confirm(Prompt(decision.say, eyebrow = "머고", yes = "예, 해 주세요", no = "아니요")) != YesNo.YES) {
+                if (confirm(Prompt(decision.say, eyebrow = "머고", yes = "응, 해 줘", no = "아니")) != YesNo.YES) {
                     voice.speak("알겠어요")
                     return
                 }
@@ -199,41 +192,115 @@ class MergoController(
         )
     }
 
-    private suspend fun execute(recipeId: String, params: Map<String, String>, situation: String) {
+    /** [quiet]면 묻지 않고 한 일이라 말하지 않고, 완료 확인·가족 알림도 묻지 않는다. 결과는 글자 카드와 기록으로만 남긴다. */
+    private suspend fun execute(recipeId: String, params: Map<String, String>, situation: String, quiet: Boolean = false) {
         val recipe = recipes[recipeId]
         val started = clock.now()
-        val text = Texts.of(recipeId)
+        val text = Texts.of(recipeId, params)
         automating = true
-        val ok = try {
+        val outcome = try {
             overlay.progress(text.progress)
-            voice.speak(text.progress)
-            recipe != null && runCatching { recipe.run(enrich(recipeId, params)) }
-                .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; log("레시피 오류 $recipeId: ${it.message}") }
-                .getOrDefault(false)
+            if (!quiet) voice.speak(text.progress)
+            if (recipe == null) {
+                RecipeOutcome.Failed(FailReason.NO_RECIPE)
+            } else {
+                runCatching { recipe.run(enrich(recipeId, params)) }
+                    .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; log("레시피 오류 $recipeId: ${it.message}") }
+                    .getOrDefault(RecipeOutcome.Failed(FailReason.ERROR))
+            }
         } finally {
             automating = false
             overlay.progress(null)
             detector.afterAutomation(clock.now())
         }
-        log("복구 $recipeId ok=$ok ${clock.now() - started}ms")
-        if (ok) {
-            overlay.done(text.done, "이제 편하게 이어서 보세요.")
-            voice.speak(text.done)
-            // 시안 05: 원래 상태가 맞는지 한 번 더 묻는다. 무응답은 맞는 것으로 본다(어르신 터치 1회 목표 유지).
-            val right = if (settings.autoExecute) YesNo.YES else confirm(Prompt("이 화면이 맞나요?", yes = "예, 맞아요", no = "아니요"), DONE_CHECK_TIMEOUT_MS)
-            if (right != YesNo.NO) {
-                familyLog.add(FamilyLog.Entry(clock.now(), situation, recipeId, notified = false, resolved = true, summary = text.log))
-                return
+        log("복구 $recipeId $outcome ${clock.now() - started}ms")
+        var label = outcome.label()
+        fun record(resolved: Boolean, summary: String, notified: Boolean = false) =
+            familyLog.add(FamilyLog.Entry(clock.now(), situation, recipeId, notified, resolved, summary, label))
+        when (outcome) {
+            is RecipeOutcome.Verified -> {
+                overlay.done(text.done, "이제 편하게 이어서 보세요.")
+                if (quiet) return record(resolved = true, summary = text.log)
+                voice.speak(text.done)
+                // 시안 05: 원래 상태가 맞는지 한 번 더 묻는다. 머고가 이미 확인했으므로 무응답은 맞는 것으로 본다(어르신 터치 1회 목표 유지).
+                val right = if (settings.autoExecute) YesNo.YES else confirm(DONE_CHECK, DONE_CHECK_TIMEOUT_MS)
+                if (right != YesNo.NO) return record(resolved = true, summary = text.log)
+                // 머고는 맞다고 확인했는데 사용자는 아니라고 했다. 목표 자체를 잘못 골랐다는 신호라 따로 남긴다.
+                label = "verified_rejected"
             }
+            // 해결도 실패도 아니므로 가족 알림을 묻지 않는다. 안내 문장은 여기서 한 번만 말한다.
+            is RecipeOutcome.Guided -> {
+                overlay.notice(outcome.said)
+                if (!quiet) voice.speak(outcome.said)
+                return record(resolved = false, summary = outcome.said)
+            }
+            is RecipeOutcome.Unverifiable -> {
+                if (quiet) return record(resolved = false, summary = UNCHECKED_LOG)
+                // 머고가 결과를 확인하지 못했으니 '다 됐어요'라고 하지 않는다. 사용자가 "예"라고 해야만 해결로 기록하고, 무응답은 미확인으로 둔다.
+                // 확인 없이 실행 모드에서는 물을 수 없으니 미확인으로만 남긴다.
+                val right = if (settings.autoExecute) {
+                    YesNo.NONE
+                } else {
+                    voice.speak("제대로 됐는지 봐 주세요")
+                    confirm(DONE_CHECK, DONE_CHECK_TIMEOUT_MS)
+                }
+                if (right == YesNo.YES) return record(resolved = true, summary = text.log)
+                if (right == YesNo.NONE) return record(resolved = false, summary = UNCHECKED_LOG)
+            }
+            is RecipeOutcome.Failed -> if (quiet) return record(resolved = false, summary = text.failLog)
         }
         val tellFamily = if (settings.autoExecute) {
             YesNo.YES
         } else {
-            confirm(Prompt("제가 해결하지 못했어요", "가족에게 알릴까요?", yes = "예, 알려 주세요", no = "아니요"))
+            confirm(Prompt("제가 해결하지 못했어요", "가족에게 알릴까요?", yes = "응, 알려 줘", no = "아니"))
         }
         val notified = tellFamily == YesNo.YES
-        familyLog.add(FamilyLog.Entry(clock.now(), situation, recipeId, notified = notified, resolved = false, summary = text.failLog))
+        record(resolved = false, summary = text.failLog, notified = notified)
         if (notified) voice.speak("가족에게 알렸어요")
+    }
+
+    /** 가족 기록에 남기는 결과 이름. 나중에 학습 라벨로 쓸 때 해결/안내/미확인/실패를 구분한다. */
+    private fun RecipeOutcome.label(): String = when (this) {
+        is RecipeOutcome.Verified -> if (acted) "verified" else "verified_noop"
+        is RecipeOutcome.Guided -> "guided"
+        is RecipeOutcome.Unverifiable -> "unverifiable"
+        is RecipeOutcome.Failed -> "failed:${reason.name.lowercase()}"
+    }
+
+    /** 설치·결제·개인정보 화면에서는 대신 누르지 않는다. 빠져나오는 법만 알려 주고 가족 알림을 묻는다. */
+    private suspend fun guideOutOfSensitiveScreen(screen: LiveScreen, utterance: String?) {
+        log("민감 화면 ${screen.pkg}: 조작하지 않고 안내")
+        val tell = confirm(Prompt(SENSITIVE_TITLE, SENSITIVE_BODY, yes = "응, 알려 줘", no = "아니"))
+        val notified = tell == YesNo.YES
+        familyLog.add(
+            FamilyLog.Entry(
+                clock.now(), utterance ?: "도와줘", SENSITIVE_RECIPE, notified, resolved = false,
+                summary = "설치·결제 같은 화면이라 누르지 않고 안내했어요", outcome = "guided",
+            ),
+        )
+        if (notified) voice.speak("가족에게 알렸어요")
+    }
+
+    private data class Guess(val recipeId: String, val params: Map<String, String>, val prompt: Prompt)
+
+    /**
+     * 도와줘를 눌렀을 때 먼저 물어볼 짐작 하나. 정상 상태와 지금 화면의 차이로 고르고, 근거가 없으면 null.
+     * 어르신이 읽을 말은 짧게, 어르신이 누를 답은 반말(어르신의 말)로 쓴다.
+     */
+    private fun guess(): Guess? {
+        val ctx = brainContext(null)
+        val base = baseline.current
+        val now = ctx.current
+        val other = "아니, 다른 거"
+        val video = base?.mediaTitle?.takeIf { now.mediaTitle != null && it != now.mediaTitle }
+        val app = base?.pkg?.takeIf { it.isNotBlank() && now.pkg.isNotBlank() && it != now.pkg }
+        return listOfNotNull(
+            Guess(RecipeIds.SKIP_AD, emptyMap(), Prompt("광고 넘길까요?", yes = "응, 넘겨 줘", no = other)).takeIf { ctx.screenHasAd },
+            video?.let { Guess(RecipeIds.RESTORE_VIDEO, mapOf("title" to it), Prompt("보던 거 다시 틀까요?", it, yes = "응, 틀어 줘", no = other)) },
+            app?.let { Guess(RecipeIds.OPEN_PREVIOUS_APP, mapOf("pkg" to it), Prompt("보던 앱 다시 열까요?", yes = "응, 열어 줘", no = other)) },
+            Guess(RecipeIds.SET_VOLUME, emptyMap(), Prompt("소리 다시 켤까요?", yes = "응, 켜 줘", no = other))
+                .takeIf { now.volume == 0 && (base?.volume ?: 0) > 0 },
+        ).firstOrNull { it.recipeId in recipes }
     }
 
     /** 말로 받은 복구에 빠진 값을 정상 상태로 채운다. 예: "아까 보던 거" → 정상 상태의 영상 제목. */
@@ -264,10 +331,24 @@ class MergoController(
         answer
     }
 
-    private suspend fun askWhatHappened(): String? = coroutineScope {
-        val tapped = async { overlay.choose("무엇을 도와드릴까요?", HELP_CHOICES, BUBBLE_TIMEOUT_MS) }
+    /** LLM을 부르면 몇 초 걸린다. 그동안 화면이 멈춘 것처럼 보이지 않게 한다. */
+    private suspend fun decide(said: String): BrainDecision {
+        log("도와줘 발화: $said")
+        val started = clock.now()
+        overlay.progress(THINKING)
+        val decision = try {
+            brain.decide(brainContext(said))
+        } finally {
+            overlay.progress(null)
+        }
+        log("Brain ${clock.now() - started}ms: $decision")
+        return decision
+    }
+
+    private suspend fun askWhatHappened(question: String = "무엇을 도와드릴까요?"): String? = coroutineScope {
+        val tapped = async { overlay.choose(question, HELP_CHOICES, BUBBLE_TIMEOUT_MS) }
         val spoken = async {
-            voice.speak("무엇을 도와드릴까요?")
+            voice.speak(question)
             voice.listen(LISTEN_TIMEOUT_MS)
         }
         val first = select<Pair<Boolean, String?>> {
@@ -288,6 +369,14 @@ class MergoController(
         const val BUBBLE_TIMEOUT_MS = 15_000L
         const val LISTEN_TIMEOUT_MS = 5_000L
         const val DONE_CHECK_TIMEOUT_MS = 10_000L
-        val HELP_CHOICES = listOf("아까 보던 거", "소리가 안 나", "이거 안 꺼져", "광고 안 꺼져")
+        val DONE_CHECK = Prompt("이 화면이 맞나요?", yes = "응, 맞아", no = "아니")
+        const val UNCHECKED_LOG = "해결됐는지 확인하지 못했어요"
+        const val THINKING = "살펴보고 있어요"
+        const val SENSITIVE_RECIPE = "sensitive_screen"
+        const val SENSITIVE_TITLE = "여기서는 누르지 않을게요"
+        const val SENSITIVE_BODY = "아무것도 누르지 말고 뒤로 가기를 누르세요. 가족에게 알릴까요?"
+        // 광고인지 아닌지는 어르신 대신 머고가 가린다("이거 안 꺼져"가 화면에 광고가 있으면 광고 넘기기로 간다).
+        // 무엇이 문제인지 말로 정리가 안 될 때를 위해 "이거 이상해"를 둔다.
+        val HELP_CHOICES = listOf("아까 보던 거", "소리가 안 나", "이거 안 꺼져", "이거 이상해")
     }
 }

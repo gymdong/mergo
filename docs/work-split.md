@@ -30,11 +30,11 @@
 | `Screen.kt` | `ScreenReader`(nodes, click, tap, back, currentPackage), `ScreenAgent`(achieve) | ScreenReader=A, **ScreenAgent=B** | B / A |
 | `Settings.kt` | `SettingsSource`(autoExecute, wakeWord) | **B** | A |
 | `Clock.kt` | 시간 주입 | - | A·B |
-| `Grace.kt` | `GraceListener`(open/close), `GracePhrases`(알아들을 문장) — 영상이 바뀐 뒤 30초 동안 "머고야 잘못 눌렀다" 같은 말을 듣는 유예 창 | **B** (Vosk, 문법 제한) | A(Controller가 열고 닫음) |
+| ~~`Grace.kt`~~ | **삭제(2026-10-30).** 30초 유예 듣기를 폐지하고 호출어 뒤의 말만 도와줘 흐름(`onHelp`)으로 받는다 | — | — |
 
-**B가 만들 것 (유예 듣기):** `GraceListener`를 Vosk로 구현한다. 영상 소리가 마이크로 들어오므로 자유 받아쓰기(SpeechRecognizer)를 쓰지 말고 `GracePhrases.DEFAULT` 문장(+호출어)만 문법으로 제한한다. 들은 문장을 `onHeard`로 넘기면 A가 확인 없이 이전 영상으로 되돌린다. 엔진 없이 시험하려면 디버그 빌드에서 `adb shell am broadcast -a app.mergo.DEBUG_HEAR --es text "'잘못 눌렀다'" -p app.mergo`를 쓴다(도와줘 흐름은 `--ez help true` 추가).
+**유예 듣기 폐지 (2026-10-30):** `GraceListener`·`GracePhrases`는 삭제했다. 음성은 호출어 뒤의 말만 인식해 `controller.onHelp(text)`로 넘긴다(B 작업 중). 엔진 없이 시험하려면 디버그 빌드에서 `adb shell am broadcast -a app.mergo.DEBUG_HEAR --es text "소리가 안 나" -p app.mergo`를 쓴다.
 
-**B가 교체할 곳:** `service/MergoService.kt`의 조립부에서 `ChoiceBrain`, `SilentVoice`, `NoAgent`, `DefaultSettings`, `NoGraceListener`(모두 `core/fakes/`)를 진짜 구현으로 바꾼다. `ScreenAgent`에는 `AccessibilityScreen`(ScreenReader 구현)을 넘기면 된다.
+**B가 교체할 곳:** `service/MergoService.kt`의 조립부에서 `ChoiceBrain`, `SilentVoice`, `NoAgent`, `DefaultSettings`(모두 `core/fakes/`)를 진짜 구현으로 바꾼다. `ScreenAgent`에는 `AccessibilityScreen`(ScreenReader 구현)을 넘기면 된다.
 
 3. **연결 지점(Orchestrator, A 소유)**: `core/MergoController`가 아래 두 흐름을 맡는다. B의 `Brain`·`VoiceIO`·`ScreenAgent`는 생성자로 주입받는다.
    - 감지 흐름: `StuckDetector`의 제안 → 말풍선과 `VoiceIO.listenYesNo` → 레시피 체인 → `Verifier` → 실패하면 FamilyLog
@@ -115,7 +115,7 @@
 ## 사전 검증 방법 (A)
 
 1. `./gradlew installDebug` → 앱의 설정 화면에서 접근성, 알림 접근, 마이크 권한을 켠다.
-2. YouTube에서 확인하려는 화면(재생 중, 컨트롤 표시, 카운트다운, 광고)을 띄우고 **도와줘 버튼을 길게 누른다** → 노드 목록과 최근 기록이 저장된다.
+2. YouTube에서 확인하려는 화면(재생 중, 컨트롤 표시, 카운트다운, 광고)을 띄우고 `adb shell am broadcast -a app.mergo.DEBUG_DUMP -p app.mergo`를 보낸다(디버그 빌드) → 노드 목록과 최근 기록이 저장된다. 도와줘 버튼 길게 누르기는 2026-10-30부터 버튼 옮기기로 바뀌었다.
 3. `adb pull /sdcard/Android/data/app.mergo/files/ ./dumps/`로 가져와 `service/YouTubeSignals.kt`의 패턴을 보정한다. 카운트다운이 끝내 잡히지 않으면 `DetectorConfig.requireCountdown = false`로 바꾼다.
 4. 로그: `adb logcat -s Mergo:*`
 5. **뒤로 가기 확인(R3):** API 36 제스처 내비게이션에서는 뒤로 가기가 `KEYCODE_BACK`으로 안 올 수 있다. 로그에 BACK이 안 찍히면 에뮬레이터를 3버튼 내비게이션으로 바꿔 시연한다(설정 → 시스템 → 탐색 모드).
@@ -134,7 +134,7 @@
 | 시청 기록에서 복원 | ✅ | Google 로그인 후 확인. 기록 화면에서 제목으로 찾아 눌러 1.4초에 복원. **로그인이 안 되어 있으면 이 경로는 실패한다(시연 기기는 로그인 필수)** |
 | **뒤로 가기 연타(R3)** | ⚠️ 미검증 | adb 가상 키는 접근성 키 필터를 거치지 않아 확인 불가. 실기기·3버튼 내비게이션에서 확인 필요 |
 | S11 광고 감지(R4) → 제안 → 건너뛰기 | ✅ | 건너뛰기 버튼이 뜨고 5초 뒤 제안, 1.02초에 넘김. 버튼은 viewId `skip_ad_button`(글자 없음), 광고 표시는 `ad_progress_text`("Sponsored · 1:46"), 건너뛰기 전 `countdown_text`는 버튼으로 보지 않음 |
-| 유예 듣기 → 말로 복원 | ✅ (연결부) | 영상 변경 시 30초 창 열림 → 디버그 방송 "머고야 잘못 눌렀다" → 확인 없이 시청 기록으로 원래 영상 복원(1.4초). 실제 음성 엔진은 B |
+| ~~유예 듣기 → 말로 복원~~ | 폐지 | 2026-10-30 유예 듣기 폐지로 삭제. 호출어 → 도와줘 흐름으로 대체 |
 
 검증하며 고친 것:
 - **판정 기준:** YouTube 플레이어 탭은 클릭 이벤트가 오지 않는다. 그래서 '카운트다운이 있으면 자동재생, 없으면 사용자 선택'으로 판정한다.
