@@ -40,7 +40,11 @@ class SetVolume(private val device: DeviceActions, private val baseline: Baselin
  * S3: 직전 앱을 다시 연다. params["app"]이 있으면 [KnownApps]의 그 앱을 연다("유튜브 어딨어").
  * 이름으로 여는 앱은 허용 목록에 있는 것만이고, 기기마다 다른 패키지를 앞에서부터 시도한다.
  */
-class OpenPreviousApp(private val device: DeviceActions, private val baseline: BaselineStore) : Recipe {
+class OpenPreviousApp(
+    private val device: DeviceActions,
+    private val baseline: BaselineStore,
+    private val screen: ScreenReader? = null,
+) : Recipe {
     override val id = RecipeIds.OPEN_PREVIOUS_APP
 
     override suspend fun run(params: Map<String, String>): RecipeOutcome {
@@ -57,7 +61,13 @@ class OpenPreviousApp(private val device: DeviceActions, private val baseline: B
         }
         val pkg = (params["pkg"]?.takeIf { it.isNotBlank() } ?: baseline.current?.pkg)?.takeIf { it.isNotBlank() }
             ?: return RecipeOutcome.Failed(FailReason.PRECONDITION)
-        return StepChain.run(id, listOf(launch(pkg)))
+        // 이미 그 앱이 앞에 있으면(제안을 보는 사이 사용자가 먼저 돌아옴) 뒤로 가기를 누르면 오히려 보던 화면을 떠난다.
+        if (device.foregroundPkg() == pkg) return RecipeOutcome.Verified(acted = false)
+        // 앱 안에서 열린 브라우저(광고 링크)는 그 앱 위에 겹쳐 있어, 앱을 다시 열면 브라우저가 그대로 보인다. 뒤로 가기로 먼저 닫는다.
+        val back = screen?.takeIf { params["via"] == "back" }?.let {
+            Step("back", { it.back() }, { Verifier.waitFor(2_000) { device.foregroundPkg()?.let { fg -> fg == pkg } } })
+        }
+        return StepChain.run(id, listOfNotNull(back, launch(pkg)))
     }
 
     private fun launch(pkg: String) =

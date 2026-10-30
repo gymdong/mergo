@@ -23,6 +23,7 @@ class StuckDetector(
     private var lastUserActionTs = Long.MIN_VALUE / 2
     private var lastCountdownTs = Long.MIN_VALUE / 2
     private val backPresses = ArrayDeque<Long>()
+    private val clicks = ArrayDeque<Long>()
 
     private var ytTitle: String? = null
     private var lastTitleChangeTs = Long.MIN_VALUE / 2
@@ -32,10 +33,12 @@ class StuckDetector(
     private data class PendingR1(val prevTitle: String, val changedAt: Long)
     private data class PendingR2(val prevPkg: String, val leftAt: Long)
     private data class R3Window(val prevTitle: String, val changedAt: Long)
+    private data class PendingLink(val fromPkg: String, val toPkg: String, val leftAt: Long)
 
     private var pendingR1: PendingR1? = null
     private var pendingR2: PendingR2? = null
     private var r3: R3Window? = null
+    private var pendingLink: PendingLink? = null
     private var quietUntil = Long.MIN_VALUE / 2
 
     private var adFirstSeen: Long? = null
@@ -65,6 +68,10 @@ class StuckDetector(
             backPresses.addLast(e.ts)
             while (backPresses.size > 5) backPresses.removeFirst()
         }
+        if (user && e.kind == EventKind.CLICK) {
+            clicks.addLast(e.ts)
+            while (clicks.size > 5) clicks.removeFirst()
+        }
         if (Marker.AUTOPLAY_COUNTDOWN in e.markers) lastCountdownTs = e.ts
         trackAd(e)
 
@@ -85,10 +92,11 @@ class StuckDetector(
             }
         }
 
-        // R3: 오조작 후 혼란 신호 — 뒤로 가기 연타
+        // R3: 오조작 후 혼란 신호 — 뒤로 가기 연타 또는 여기저기 연달아 누름
         r3?.let { w ->
             val recentBacks = backPresses.count { it >= e.ts - config.r3BackWithinMs && it >= w.changedAt }
-            if (recentBacks >= config.r3BackCount) {
+            val recentClicks = clicks.count { it >= e.ts - config.r3ClickWithinMs && it > w.changedAt }
+            if (recentBacks >= config.r3BackCount || recentClicks >= config.r3ClickCount) {
                 emit(out, Suggestion.restoreVideo(RuleId.R3_MISTOUCH, w.prevTitle, "mistouch", e.ts))
                 r3 = null
                 pendingR2 = null
@@ -120,6 +128,16 @@ class StuckDetector(
             }
         }
         r3?.let { if (now - it.changedAt > config.r3WindowMs) r3 = null }
+        pendingLink?.let {
+            if (now - it.leftAt >= config.linkWaitMs) {
+                val s = Suggestion(
+                    RuleId.R5_LINK_EXIT, it.toPkg, RecipeIds.OPEN_PREVIOUS_APP,
+                    mapOf("pkg" to it.fromPkg, "via" to "back"), "보던 화면으로 돌아갈까요?", now,
+                    headline = "다른 화면이 열렸어요", yesLabel = "응, 돌아가 줘", noLabel = "아니, 이거 볼래",
+                )
+                if (emit(out, s) != Emit.DEFERRED) pendingLink = null
+            }
+        }
         val first = adFirstSeen
         if (first != null && !adSuggested) {
             if (now - adLastSeen > config.r4GoneMs) {
@@ -168,7 +186,9 @@ class StuckDetector(
         pendingR1 = null
         pendingR2 = null
         r3 = null
+        pendingLink = null
         backPresses.clear()
+        clicks.clear()
     }
 
     private fun onTitleChanged(prev: String, new: String, ts: Long) {
@@ -198,6 +218,14 @@ class StuckDetector(
         val prev = foregroundPkg
         if (pkg == prev) return
         foregroundPkg = pkg
+        // R5: 유튜브 같은 앱에서 누른 직후 브라우저·스토어로 넘어감. 다른 곳으로 또 옮기면(돌아오면) 취소한다.
+        pendingLink = if (prev in config.linkSourcePkgs && pkg in config.linkTargetPkgs &&
+            ts - lastUserActionTs <= config.linkTouchWithinMs
+        ) {
+            PendingLink(prev!!, pkg, ts)
+        } else {
+            null
+        }
         if (isLauncher) {
             val w = r3
             // 보던 영상이 이미 정상 상태 영상이면 오조작이 아니라 그냥 홈으로 나간 것(R2)이다.

@@ -27,6 +27,19 @@ data class DetectorConfig(
     val r3WindowMs: Long = 30_000L,              // R3: 바뀐 뒤 30초 관찰
     val r3BackCount: Int = 2,                    // R3: 뒤로 가기 2회 이상
     val r3BackWithinMs: Long = 3_000L,           //     3초 안에
+    val r3ClickCount: Int = 3,                   // R3: 또는 같은 앱에서 3번 이상 연달아 누름
+    val r3ClickWithinMs: Long = 3_000L,          //     3초 안에
+    /**
+     * R5: 이 앱들에서 누른 직후 브라우저·스토어가 열리면 오조작으로 본다(광고·설명 링크를 잘못 누름).
+     * 카톡처럼 링크를 일부러 여는 앱은 넣지 않는다. 다른 앱에서 열린 경우는 어르신이 도와줘를 부르면 된다.
+     */
+    val linkSourcePkgs: Set<String> = setOf("com.google.android.youtube"),
+    val linkTargetPkgs: Set<String> = setOf(
+        "com.android.chrome", "com.sec.android.app.sbrowser", "com.naver.whale", "org.mozilla.firefox",
+        "com.microsoft.emmx", "com.android.browser", "com.android.vending",
+    ),
+    val linkTouchWithinMs: Long = 3_000L,        // R5: 누르고 이 시간 안에 넘어감
+    val linkWaitMs: Long = 5_000L,               // R5: 넘어간 화면에 5초 머묾(곧바로 돌아오면 제안하지 않음)
     val r4WaitMs: Long = 5_000L,                 // R4: 건너뛰기 버튼이 5초 보이고 무동작
     val r4GoneMs: Long = 2_000L,                 // R4: 이만큼 안 보이면 광고가 끝난 것으로 봄
 )

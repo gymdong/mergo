@@ -2,7 +2,7 @@ package app.mergo.detect
 
 import app.mergo.model.RecipeIds
 
-enum class RuleId { R1_AUTOPLAY, R2_HOME_EXIT, R3_MISTOUCH, R4_AD_SKIP }
+enum class RuleId { R1_AUTOPLAY, R2_HOME_EXIT, R3_MISTOUCH, R4_AD_SKIP, R5_LINK_EXIT }
 
 /** 감지 규칙이 어르신께 드리는 제안 하나. */
 data class Suggestion(

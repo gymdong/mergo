@@ -70,6 +70,7 @@ class MergoService : AccessibilityService() {
 
     private var foreground: String? = null
     private var ignored: Set<String> = emptySet()
+    private var navBarPkgs: Set<String> = emptySet()
     private var lastKeyTs = 0L
     private var lastVolume = -1
     private var lastSnapshotTs = 0L
@@ -102,6 +103,7 @@ class MergoService : AccessibilityService() {
             ignoredPkgs = DetectorConfig().ignoredPkgs + imes + packageName,
         )
         ignored = config.ignoredPkgs
+        navBarPkgs = config.launcherPkgs + "com.android.systemui"
         log("시작: launchers=${config.launcherPkgs} ignored=${config.ignoredPkgs}")
 
         val cooldown = Cooldown()
@@ -116,7 +118,7 @@ class MergoService : AccessibilityService() {
         val recipes: Map<String, Recipe> = listOf(
             RestoreVideo(screen, device, currentTitle, agent),
             SetVolume(device, baseline),
-            OpenPreviousApp(device, baseline),
+            OpenPreviousApp(device, baseline, screen),
             SkipAd(screen, voice),
             OpenInternetPanel(screen, device),
             object : Recipe {
@@ -155,6 +157,13 @@ class MergoService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         val pkg = event.packageName?.toString() ?: return
+        if (event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED && isNavBack(pkg, event)) {
+            // 3버튼 내비게이션의 뒤로 가기는 키 이벤트가 아니라 런처·시스템 UI의 클릭으로 온다(에뮬레이터 API 36 확인).
+            // 뒤로 가기는 지금 앞에 있는 앱에 대한 동작이라 그 앱의 BACK으로 넘긴다.
+            lastKeyTs = clock.now()
+            controller.onScreenEvent(ScreenEvent(lastKeyTs, foreground ?: UNKNOWN_PKG, null, emptyList(), true, EventKind.BACK))
+            return
+        }
         val kind = when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> EventKind.WINDOW_CHANGED
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> EventKind.CONTENT_CHANGED
@@ -188,6 +197,13 @@ class MergoService : AccessibilityService() {
         }
         val user = kind in USER_KINDS
         controller.onScreenEvent(ScreenEvent(now, pkg, title, texts, user, kind, markers))
+    }
+
+    /** 내비게이션 바의 뒤로 가기 단추. Pixel은 런처가, AOSP·삼성은 시스템 UI가 그리고 viewId는 둘 다 `:id/back`이다. */
+    private fun isNavBack(pkg: String, event: AccessibilityEvent): Boolean {
+        if (pkg !in navBarPkgs) return false
+        val id = runCatching { event.source?.viewIdResourceName }.getOrNull() ?: return false
+        return id.endsWith(":id/back")
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {

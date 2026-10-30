@@ -195,6 +195,29 @@ class RecipesTest {
     }
 
     @Test
+    fun `R5 앱 안에 열린 브라우저는 뒤로 가기로 먼저 닫고, 돌아오면 앱을 다시 열지 않는다`() = runTest {
+        val device = FakeDevice().apply { fg = "com.android.chrome" }
+        val screen = object : app.mergo.model.ScreenReader by FakeScreen() {
+            override fun back(): Boolean { device.fg = yt; return true }
+        }
+        val outcome = OpenPreviousApp(device, BaselineStore(Clock { 0 }, emptySet()), screen).run(mapOf("pkg" to yt, "via" to "back"))
+        assertEquals(RecipeOutcome.Verified(), outcome)
+        assertTrue(device.launched.isEmpty())
+    }
+
+    @Test
+    fun `R5 제안을 보는 사이 이미 돌아왔으면 뒤로 가기를 누르지 않는다`() = runTest {
+        val device = FakeDevice().apply { fg = yt }
+        var backs = 0
+        val screen = object : app.mergo.model.ScreenReader by FakeScreen() {
+            override fun back(): Boolean { backs++; return true }
+        }
+        val outcome = OpenPreviousApp(device, BaselineStore(Clock { 0 }, emptySet()), screen).run(mapOf("pkg" to yt, "via" to "back"))
+        assertEquals(RecipeOutcome.Verified(acted = false), outcome)
+        assertEquals(0, backs)
+    }
+
+    @Test
     fun `S3 열 앱도 정상 상태도 없으면 전제 조건 실패`() = runTest {
         val device = FakeDevice()
         assertEquals(RecipeOutcome.Failed(FailReason.PRECONDITION), OpenPreviousApp(device, BaselineStore(Clock { 0 }, emptySet())).run(emptyMap()))
