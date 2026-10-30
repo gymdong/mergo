@@ -102,4 +102,20 @@ class BaselineStoreTest {
         tickUntil(20_000)
         assertEquals(yt, store.current?.pkg)
     }
+
+    @Test
+    fun `다른 앱으로 가면 지금 제목은 비우고 돌아오면 다시 낸다`() {
+        start()
+        ev(1_000, EventKind.CONTENT_CHANGED, title = "영상 가")
+        assertEquals("영상 가", store.liveTitle())
+
+        ev(5_000, EventKind.WINDOW_CHANGED, pkg = "com.android.chrome")
+        assertNull(store.liveTitle())
+
+        ev(9_000, EventKind.WINDOW_CHANGED, pkg = "launcher")
+        assertNull(store.liveTitle())
+
+        ev(12_000, EventKind.WINDOW_CHANGED)
+        assertEquals("영상 가", store.liveTitle())
+    }
 }
