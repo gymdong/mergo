@@ -2,33 +2,33 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
-val localProperties = Properties().apply {
-    val file = rootProject.file("local.properties")
-    if (file.exists()) file.inputStream().use { load(it) }
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
-
-fun local(name: String, default: String = ""): String =
-    localProperties.getProperty(name, default).trim()
+fun localProp(key: String, default: String = "") = localProps.getProperty(key, default)
 
 android {
-    namespace = "com.mergo"
+    namespace = "app.mergo"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.mergo"
+        applicationId = "app.mergo"
         minSdk = 29
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1"
+        versionName = "0.1.0"
 
-        // LLM 교체는 local.properties의 LLM_PROVIDER 값 하나로 한다 (gemini | claude).
-        buildConfigField("String", "LLM_PROVIDER", "\"${local("LLM_PROVIDER", "gemini")}\"")
-        buildConfigField("String", "GEMINI_API_KEY", "\"${local("GEMINI_API_KEY")}\"")
-        buildConfigField("String", "GEMINI_MODEL", "\"${local("GEMINI_MODEL", "gemini-3.5-flash-lite")}\"")
-        buildConfigField("String", "ANTHROPIC_API_KEY", "\"${local("ANTHROPIC_API_KEY")}\"")
-        buildConfigField("String", "CLAUDE_MODEL", "\"${local("CLAUDE_MODEL", "claude-haiku-5-5")}\"")
+        // API 키는 local.properties에만 둔다. 없으면 LLM 호출만 비활성화된다.
+        buildConfigField("String", "LLM_PROVIDER", "\"${localProp("LLM_PROVIDER", "gemini")}\"")
+        buildConfigField("String", "GEMINI_MODEL", "\"${localProp("GEMINI_MODEL", "gemini-3.5-flash-lite")}\"")
+        buildConfigField("String", "GEMINI_API_KEY", "\"${localProp("GEMINI_API_KEY")}\"")
+        buildConfigField("String", "CLAUDE_MODEL", "\"${localProp("CLAUDE_MODEL", "claude-haiku-5-5")}\"")
+        buildConfigField("String", "CLAUDE_API_KEY", "\"${localProp("CLAUDE_API_KEY")}\"")
     }
 
     buildFeatures {
@@ -39,9 +39,18 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+}
+
+kotlin {
+    jvmToolchain(17)
 }
 
 dependencies {
+    implementation("androidx.core:core-ktx:1.16.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

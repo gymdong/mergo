@@ -2,9 +2,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- 직전 앱 다시 열기(S3)를 위해 런처 앱 목록을 조회한다 -->
     <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
@@ -15,9 +25,9 @@
 
     <application
         android:allowBackup="false"
-        android:label="머고"
-        android:supportsRtl="false"
-        android:theme="@style/Theme.Mergo">
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.DeviceDefault.Light">
 
         <activity
             android:name=".MainActivity"
@@ -28,7 +38,35 @@
             </intent-filter>
         </activity>
 
-        <activity android:name=".settings.SettingsActivity" />
-        <activity android:name=".report.ReportActivity" />
+        <service
+            android:name=".service.MergoService"
+            android:exported="false"
+            android:label="@string/service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/mergo_accessibility" />
+        </service>
+
+        <!-- MediaSession에서 영상 제목을 읽기 위한 알림 접근 권한용. 알림 내용은 쓰지 않는다. -->
+        <service
+            android:name=".service.MediaListener"
+            android:exported="false"
+            android:label="@string/media_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <activity
+            android:name=".settings.SettingsActivity"
+            android:theme="@style/Theme.Mergo" />
+        <activity
+            android:name=".report.ReportActivity"
+            android:theme="@style/Theme.Mergo" />
     </application>
 </manifest>

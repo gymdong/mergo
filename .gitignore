@@ -1,7 +1,18 @@
-local.properties
+# Android / Gradle
 .gradle/
 .kotlin/
 build/
+local.properties
+*.apk
+*.aab
+captures/
+.externalNativeBuild/
+.cxx/
+
+# IDE
 .idea/
 *.iml
-captures/
+.DS_Store
+
+# OMC 작업 상태 (스펙은 docs/에 공유)
+.omc/
