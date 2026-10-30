@@ -1,6 +1,6 @@
 # B(AI 담당) 인계 — 2026-10-30 기준
 
-A(기기 담당) 작업은 `feat/device` 브랜치(`3360efe`)에 있다. 이 문서는 B가 바로 작업을 시작하는 데 필요한 것만 담는다.
+A(기기 담당) 작업은 `dev` 브랜치에 병합되어 있다(PR #1). **브랜치 규칙: 작업은 `dev`에서 따고 `dev`로 PR, `main`에는 최종본만 올린다.** 이 문서는 B가 바로 작업을 시작하는 데 필요한 것만 담는다.
 - 스펙: [`mergo-mvp-spec.md`](./mergo-mvp-spec.md)
 - 분담: [`work-split.md`](./work-split.md)
 - 에뮬레이터 검증표: `work-split.md` 맨 아래 "에뮬레이터 검증 결과"
@@ -12,7 +12,7 @@ A(기기 담당) 작업은 `feat/device` 브랜치(`3360efe`)에 있다. 이 문
 ## 2. 시작하기
 
 ```bash
-git fetch && git checkout feat/device && git checkout -b feat/ai
+git fetch && git checkout -b feat/ai origin/dev   # 작업 후 dev로 PR
 # local.properties (커밋 금지, .gitignore 처리됨)
 sdk.dir=/Users/<you>/Library/Android/sdk
 GEMINI_API_KEY=...

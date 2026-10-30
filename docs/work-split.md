@@ -18,7 +18,7 @@
 
 ## 0단계 · 함께 (첫 45분) — 계약 확정과 뼈대
 
-1. **A**: Gradle 프로젝트 뼈대를 만든다(Wrapper, `app` 모듈, minSdk 29, target 36, `local.properties`는 gitignore). `main`에 push한다.
+1. **A**: Gradle 프로젝트 뼈대를 만든다(Wrapper, `app` 모듈, minSdk 29, target 36, `local.properties`는 gitignore). `dev`에 PR로 올린다.
 2. **계약 (확정, `feat/device`에서 작성)**: `app/src/main/java/app/mergo/model/`가 기준이다. 아래는 요약이며, 이후 변경은 반드시 상대에게 알린다.
 
 | 파일 | 내용 | 구현 | 사용 |
@@ -39,7 +39,7 @@
 3. **연결 지점(Orchestrator, A 소유)**: `core/MergoController`가 아래 두 흐름을 맡는다. B의 `Brain`·`VoiceIO`·`ScreenAgent`는 생성자로 주입받는다.
    - 감지 흐름: `StuckDetector`의 제안 → 말풍선과 `VoiceIO.listenYesNo` → 레시피 체인 → `Verifier` → 실패하면 FamilyLog
    - 도와줘 흐름: 도와줘 버튼 → `VoiceIO.listen` → `Brain.decide` → 레시피
-4. **Git 규칙**: 브랜치는 `feat/device`(A)와 `feat/ai`(B)로 나눈다. **점검 시점마다 `main`에 merge**하고, `model/` 변경은 단독으로 PR한다.
+4. **Git 규칙**: 작업 브랜치는 `feat/device`(A)와 `feat/ai`(B)로 나눈다. **점검 시점마다 `dev`에 PR로 병합**하고, `main`에는 최종본만 올린다. `model/` 변경은 단독으로 PR한다.
 
 ---
 
@@ -56,7 +56,7 @@
 | `RestoreVideo`(S1 순서: 이전 버튼 → 기록 → 에이전트), `Verifier` | |
 | `MergoController`: 감지 흐름 연결 | |
 
-**✅ 점검 1:** 에뮬레이터에서 S1이 끝까지 1회 성공해야 한다(말풍선 → "응" → 이전 영상 재생). Brain 테스트셋은 JVM에서 통과해야 한다. 이 시점에 `main`에 merge한다.
+**✅ 점검 1:** 에뮬레이터에서 S1이 끝까지 1회 성공해야 한다(말풍선 → "응" → 이전 영상 재생). Brain 테스트셋은 JVM에서 통과해야 한다. 이 시점에 `dev`에 PR로 병합한다.
 
 ---
 
