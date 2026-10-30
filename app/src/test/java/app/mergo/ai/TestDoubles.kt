@@ -45,7 +45,7 @@ class RecordingVoice(vararg answers: YesNo) : VoiceIO {
         spoken += text
     }
 
-    override suspend fun listen(timeoutMs: Long): String? = null
+    override suspend fun listen(timeoutMs: Long, onReady: () -> Unit): String? = null
 
     override suspend fun listenYesNo(timeoutMs: Long): YesNo {
         questions++

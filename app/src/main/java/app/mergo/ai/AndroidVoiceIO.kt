@@ -89,9 +89,9 @@ class AndroidVoiceIO(
         Log.d(TAG, "TTS ${SystemClock.elapsedRealtime() - started}ms: $text")
     }
 
-    override suspend fun listen(timeoutMs: Long): String? = usingMic {
+    override suspend fun listen(timeoutMs: Long, onReady: () -> Unit): String? = usingMic {
         withTimeoutOrNull(timeoutMs) {
-            withContext(Dispatchers.Main) { recognize() }
+            withContext(Dispatchers.Main) { recognize(onReady) }
         }
     }
 
@@ -127,7 +127,7 @@ class AndroidVoiceIO(
         speech.destroy()
     }
 
-    private suspend fun recognize(): String? = suspendCancellableCoroutine { cont ->
+    private suspend fun recognize(onReady: () -> Unit): String? = suspendCancellableCoroutine { cont ->
         val speech = SpeechRecognizer.createSpeechRecognizer(app)
         recognizer = speech
         cont.invokeOnCancellation { main.post { release(speech) } }
@@ -143,7 +143,7 @@ class AndroidVoiceIO(
                 if (cont.isActive) cont.resume(null)
             }
 
-            override fun onReadyForSpeech(params: Bundle?) = Unit
+            override fun onReadyForSpeech(params: Bundle?) { if (cont.isActive) onReady() }
             override fun onBeginningOfSpeech() = Unit
             override fun onRmsChanged(rmsdB: Float) = Unit
             override fun onBufferReceived(buffer: ByteArray?) = Unit

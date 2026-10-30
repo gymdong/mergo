@@ -134,9 +134,9 @@ class MergoController(
                 // 어르신이 직접 요청했다면 이 화면에서도 복구할 수 있어야 한다.
                 if (utterance == null) {
                     overlay.notice(SENSITIVE_TITLE)
-                    voice.speak("여기서는 버튼을 누르지 않을게요. 화면이 어둡거나 글씨가 작으면 말씀해 주세요.")
                 }
-                val said = utterance ?: askWhatHappened() ?: return guideOutOfSensitiveScreen(screen, null)
+                val said = utterance ?: askWhatHappened("화면이 어둡거나 글씨가 작으면 말씀해 주세요.")
+                    ?: return guideOutOfSensitiveScreen(screen, null)
                 if (!KeywordRules.isVisualRescueRequest(said)) return guideOutOfSensitiveScreen(screen, said)
                 val decision = decide(said)
                 if (decision.recipe !in DISPLAY_RECIPES) return guideOutOfSensitiveScreen(screen, said)
@@ -144,7 +144,7 @@ class MergoController(
             }
             var said = utterance ?: run {
                 var otherProblem: String? = null
-                // 머고가 짐작 가는 게 있으면 그것 하나만 먼저 묻는다. 아니라고 하면 선택지를 보여 준다.
+                // 머고가 짐작 가는 게 있으면 그것 하나만 먼저 묻는다. 아니라고 하면 자유 발화부터 듣는다.
                 guess()?.let { g ->
                     log("도와줘 추측: ${g.recipeId} ${g.params}")
                     val reply = confirmGuess(g.prompt)
@@ -376,8 +376,11 @@ class MergoController(
     private suspend fun confirmGuess(prompt: Prompt): GuessReply = coroutineScope {
         val buttons = async { overlay.ask(prompt, BUBBLE_TIMEOUT_MS) }
         val spoken = async {
-            voice.speak(listOfNotNull(prompt.title, prompt.body).joinToString(" "))
-            voice.listen(LISTEN_TIMEOUT_MS)
+            // 버튼을 누르자마자 말씀해도 놓치지 않는다. 첫 듣기에 답이 없을 때만 음성으로 질문한다.
+            voice.listen(LISTEN_TIMEOUT_MS) ?: run {
+                voice.speak(listOfNotNull(prompt.title, prompt.body).joinToString(" "))
+                voice.listen(LISTEN_TIMEOUT_MS)
+            }
         }
         val first = select<GuessInput> {
             buttons.onAwait { GuessInput.Button(it) }
@@ -419,6 +422,13 @@ class MergoController(
     }
 
     private suspend fun askWhatHappened(question: String = "무엇을 도와드릴까요?"): String? = coroutineScope {
+        // 추측 근거가 없을 때는 보기보다 말을 먼저 받는다.
+        overlay.listening(question, ready = false)
+        val firstSaid = voice.listen(LISTEN_TIMEOUT_MS) { overlay.listening(question, ready = true) }
+        overlay.dismiss()
+        if (!firstSaid.isNullOrBlank()) return@coroutineScope firstSaid
+
+        // 말을 못 했거나 인식하지 못했을 때만 큰 선택지를 보조 경로로 보여 준다.
         val tapped = async { overlay.choose(question, HELP_CHOICES, BUBBLE_TIMEOUT_MS) }
         val spoken = async {
             voice.speak(question)

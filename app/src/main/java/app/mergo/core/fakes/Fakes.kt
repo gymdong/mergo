@@ -42,7 +42,7 @@ class SilentVoice : VoiceIO {
     override suspend fun speak(text: String) {
         runCatching { Log.i("Mergo", "말하기: $text") }
     }
-    override suspend fun listen(timeoutMs: Long): String? = null
+    override suspend fun listen(timeoutMs: Long, onReady: () -> Unit): String? = null
     override suspend fun listenYesNo(timeoutMs: Long): YesNo = YesNo.NONE
 }
 

@@ -53,6 +53,8 @@ class MergoControllerTest {
             return a
         }
         val chosenPrompts = mutableListOf<String>()
+        val listeningStates = mutableListOf<Boolean>()
+        override fun listening(prompt: String, ready: Boolean) { listeningStates += ready }
         override suspend fun choose(prompt: String, choices: List<String>, timeoutMs: Long): String? {
             chosenPrompts += prompt
             val c = choice ?: run { delay(timeoutMs); return null }
@@ -126,6 +128,7 @@ class MergoControllerTest {
         env.controller.onHelp()
         assertEquals("화면이 너무 어두워", env.brainCalls.single().utterance)
         assertEquals(1, env.recipe.calls.size)
+        assertTrue("첫 듣기 전에 추측 질문을 말하지 않는다", "보던 거 다시 틀까요?" !in env.voice.spoken)
     }
 
     @Test
@@ -376,7 +379,7 @@ class MergoControllerTest {
     }
 
     @Test
-    fun `도와줘 선택지를 누르면 Brain이 고른 레시피를 확인 뒤 실행한다`() = runTest {
+    fun `첫 듣기에 답이 없으면 선택지를 누르고 Brain이 고른 레시피를 실행한다`() = runTest {
         val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES, choice = "아까 보던 거"))
         env.controller.onHelp()
         assertEquals("아까 보던 거", env.brainCalls.single().utterance)
@@ -420,14 +423,27 @@ class MergoControllerTest {
     }
 
     @Test
-    fun `바뀐 게 없으면 짐작 없이 바로 선택지를 보여 준다`() = runTest {
+    fun `바뀐 게 없으면 먼저 듣고 답이 없을 때만 선택지를 보여 준다`() = runTest {
         val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES, choice = "아까 보던 거"))
         env.baseline.onDevice(8, true, 0)
         env.play(1_000, "영상 가")
         repeat(40) { delay(1_000); env.controller.tick() }
         env.controller.onHelp()
         assertTrue("보던 거 다시 틀까요?" !in env.overlay.asked)
+        assertEquals(false, env.overlay.listeningStates.first())
         assertEquals("아까 보던 거", env.brainCalls.single().utterance)
+    }
+
+    @Test
+    fun `추측 근거가 없으면 말한 문제를 선택지 없이 바로 처리한다`() = runTest {
+        val env = Env(this, voice = FakeVoice(heard = "화면이 너무 어두워"),
+            overlay = FakeOverlay(choice = "아까 보던 거"), recipeId = RecipeIds.BRIGHTEN_SCREEN,
+            decision = BrainDecision("시각 설정", RecipeIds.BRIGHTEN_SCREEN, emptyMap(), "화면을 밝게 할게요.", false))
+        env.controller.onHelp()
+        assertEquals("화면이 너무 어두워", env.brainCalls.single().utterance)
+        assertTrue(env.overlay.chosenPrompts.isEmpty())
+        assertEquals(listOf(false, true), env.overlay.listeningStates)
+        assertTrue("듣기 전 안내 음성을 재생하지 않는다", "무엇을 도와드릴까요?" !in env.voice.spoken)
     }
 
     @Test
