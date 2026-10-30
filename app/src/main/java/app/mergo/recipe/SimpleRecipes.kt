@@ -3,6 +3,7 @@ package app.mergo.recipe
 import app.mergo.memory.BaselineStore
 import app.mergo.model.FailReason
 import app.mergo.model.KnownApps
+import app.mergo.model.NodeSnapshot
 import app.mergo.model.Recipe
 import app.mergo.model.RecipeIds
 import app.mergo.model.RecipeOutcome
@@ -61,6 +62,49 @@ class OpenPreviousApp(private val device: DeviceActions, private val baseline: B
 
     private fun launch(pkg: String) =
         Step("launch:$pkg", { device.launchApp(pkg) }, { Verifier.waitFor(4_000) { device.foregroundPkg()?.let { it == pkg } } })
+}
+
+/**
+ * S8: 인터넷 패널을 열어 비행기 모드면 끄고, 와이파이가 꺼져 있으면 켠다. 10초 안에 연결되면 성공이다.
+ * 패널(Android 12+ 시스템 인터넷 창)의 단추는 viewId로 찾는다. 와이파이 스위치는 켜짐 여부를 노드로 알 수 없어
+ * 시스템에 먼저 묻고, 꺼져 있을 때만 누른다. 단추를 못 찾으면 패널을 열어 둔 채 직접 누르도록 안내한다.
+ */
+class OpenInternetPanel(
+    private val screen: ScreenReader,
+    private val device: DeviceActions,
+    private val onlineWaitMs: Long = 10_000,
+) : Recipe {
+    override val id = RecipeIds.OPEN_INTERNET_PANEL
+
+    override suspend fun run(params: Map<String, String>): RecipeOutcome {
+        if (device.isOnline()) return RecipeOutcome.Guided("인터넷은 연결돼 있어요")
+        if (!device.openInternetPanel()) return RecipeOutcome.Failed(FailReason.NOT_REACHED)
+        var acted = false
+        find(AIRPLANE_BUTTON)?.let {
+            acted = screen.click(it.id)
+            // 비행기 모드를 끄면 패널이 다시 그려지고, 전에 켜 두었던 와이파이는 스스로 켜지기도 한다.
+            delay(1_500)
+        }
+        if (!device.isWifiEnabled()) find(WIFI_TOGGLE)?.let { acted = screen.click(it.id) || acted }
+        if (!acted) return RecipeOutcome.Guided("화면에서 와이파이를 눌러 켜 주세요")
+        if (!Verifier.waitUntil(onlineWaitMs) { device.isOnline() }) return RecipeOutcome.Failed(FailReason.NOT_REACHED)
+        screen.back()
+        return RecipeOutcome.Verified()
+    }
+
+    /** 패널이 뜰 때까지 잠시 기다리며 viewId가 [suffix]로 끝나는 노드를 찾는다. */
+    private suspend fun find(suffix: String): NodeSnapshot? {
+        repeat(10) {
+            screen.nodes().firstOrNull { it.viewId?.endsWith(suffix) == true }?.let { return it }
+            delay(300)
+        }
+        return null
+    }
+
+    private companion object {
+        const val AIRPLANE_BUTTON = ":id/apm_button"
+        const val WIFI_TOGGLE = ":id/wifi_toggle"
+    }
 }
 
 /** 볼륨이 이미 켜져 있을 때의 안내. 출력 장치·재생 상태는 아직 읽지 못해 둘 다 말한다. */

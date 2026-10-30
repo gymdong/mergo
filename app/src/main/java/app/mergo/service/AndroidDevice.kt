@@ -6,6 +6,8 @@ import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.net.wifi.WifiManager
+import android.provider.Settings
 import app.mergo.recipe.DeviceActions
 
 class AndroidDevice(
@@ -14,6 +16,7 @@ class AndroidDevice(
 ) : DeviceActions {
     private val audio = context.getSystemService(AudioManager::class.java)
     private val conn = context.getSystemService(ConnectivityManager::class.java)
+    private val wifi = context.getSystemService(WifiManager::class.java)
 
     override fun foregroundPkg(): String? = foreground()
 
@@ -37,5 +40,12 @@ class AndroidDevice(
         val caps = conn.getNetworkCapabilities(conn.activeNetwork) ?: return false
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
             caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
+    override fun isWifiEnabled(): Boolean = wifi?.isWifiEnabled == true
+
+    override fun openInternetPanel(): Boolean {
+        val intent = Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { context.startActivity(intent) }.isSuccess
     }
 }

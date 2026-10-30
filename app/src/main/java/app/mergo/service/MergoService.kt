@@ -36,6 +36,7 @@ import app.mergo.model.RecipeIds
 import app.mergo.model.RecipeOutcome
 import app.mergo.model.ScreenAgent
 import app.mergo.model.ScreenEvent
+import app.mergo.recipe.OpenInternetPanel
 import app.mergo.recipe.OpenPreviousApp
 import app.mergo.recipe.RestoreVideo
 import app.mergo.recipe.SetVolume
@@ -116,6 +117,7 @@ class MergoService : AccessibilityService() {
             SetVolume(device, baseline),
             OpenPreviousApp(device, baseline),
             SkipAd(screen, voice),
+            OpenInternetPanel(screen, device),
             object : Recipe {
                 override val id = RecipeIds.SCREEN_AGENT
                 // 에이전트의 '완료'는 LLM의 선언일 뿐이다. 목표별 검증 조건이 생기기 전까지는 검증 불가로 둔다.

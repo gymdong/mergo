@@ -199,6 +199,56 @@ class RecipesTest {
         assertTrue(device.launched.isEmpty())
     }
 
+    private val wifiToggle = { n(desc = "Wi‑Fi", viewId = "com.android.systemui:id/wifi_toggle") }
+    private val airplaneButton = { n(text = "Turn off airplane mode", viewId = "com.android.systemui:id/apm_button") }
+
+    @Test
+    fun `S8 와이파이가 꺼져 있으면 패널에서 켜고 연결되면 패널을 닫는다`() = runTest {
+        val device = FakeDevice().apply { online = false; wifiOn = false }
+        val toggle = wifiToggle()
+        val screen = FakeScreen()
+        device.onOpenPanel = { screen.nodeList = listOf(toggle) }
+        screen.onClick = { if (it === toggle) { device.wifiOn = true; device.online = true } }
+        assertEquals(RecipeOutcome.Verified(), OpenInternetPanel(screen, device).run(emptyMap()))
+        assertEquals(listOf(toggle), screen.clicks)
+        assertEquals(1, screen.backs)
+    }
+
+    @Test
+    fun `S8 비행기 모드면 먼저 끄고, 와이파이가 스스로 켜지면 스위치는 누르지 않는다`() = runTest {
+        val device = FakeDevice().apply { online = false; wifiOn = false }
+        val apm = airplaneButton()
+        val screen = FakeScreen()
+        device.onOpenPanel = { screen.nodeList = listOf(apm, wifiToggle()) }
+        screen.onClick = { if (it === apm) { device.wifiOn = true; device.online = true } }
+        assertEquals(RecipeOutcome.Verified(), OpenInternetPanel(screen, device).run(emptyMap()))
+        assertEquals("켜진 와이파이를 다시 눌러 끄지 않는다", listOf(apm), screen.clicks)
+    }
+
+    @Test
+    fun `S8 와이파이는 켜져 있는데 연결이 안 되면 스위치를 누르지 않고 직접 보도록 안내한다`() = runTest {
+        val device = FakeDevice().apply { online = false; wifiOn = true }
+        val screen = FakeScreen()
+        device.onOpenPanel = { screen.nodeList = listOf(wifiToggle()) }
+        assertEquals(RecipeOutcome.Guided("화면에서 와이파이를 눌러 켜 주세요"), OpenInternetPanel(screen, device).run(emptyMap()))
+        assertTrue(screen.clicks.isEmpty())
+    }
+
+    @Test
+    fun `S8 켜도 10초 안에 연결되지 않으면 실패`() = runTest {
+        val device = FakeDevice().apply { online = false; wifiOn = false }
+        val screen = FakeScreen()
+        device.onOpenPanel = { screen.nodeList = listOf(wifiToggle()) }
+        assertEquals(RecipeOutcome.Failed(FailReason.NOT_REACHED), OpenInternetPanel(screen, device).run(emptyMap()))
+    }
+
+    @Test
+    fun `S8 이미 연결돼 있으면 패널을 열지 않는다`() = runTest {
+        val device = FakeDevice().apply { online = true }
+        assertTrue(OpenInternetPanel(FakeScreen(), device).run(emptyMap()) is RecipeOutcome.Guided)
+        assertTrue(device.panels.isEmpty())
+    }
+
     @Test
     fun `S11 건너뛰기 버튼이 늦게 나타나면 기다렸다가 누른다`() = runTest {
         val screen = FakeScreen()
