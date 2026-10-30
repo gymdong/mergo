@@ -62,7 +62,7 @@ class FakeVoice(
 ) : VoiceIO {
     val spoken = mutableListOf<String>()
     override suspend fun speak(text: String) { spoken += text }
-    override suspend fun listen(timeoutMs: Long) = heard
+    override suspend fun listen(timeoutMs: Long, onReady: () -> Unit): String? { onReady(); return heard }
     override suspend fun listenYesNo(timeoutMs: Long) = yesNo
 }
 
