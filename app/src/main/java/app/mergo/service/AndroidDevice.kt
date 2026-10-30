@@ -1,0 +1,41 @@
+package app.mergo.service
+
+import android.content.Context
+import android.content.Intent
+import android.media.AudioManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.Uri
+import app.mergo.recipe.DeviceActions
+
+class AndroidDevice(
+    private val context: Context,
+    private val foreground: () -> String?,
+) : DeviceActions {
+    private val audio = context.getSystemService(AudioManager::class.java)
+    private val conn = context.getSystemService(ConnectivityManager::class.java)
+
+    override fun foregroundPkg(): String? = foreground()
+
+    override fun launchApp(pkg: String): Boolean {
+        val intent = context.packageManager.getLaunchIntentForPackage(pkg) ?: return false
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { context.startActivity(intent) }.isSuccess
+    }
+
+    override fun openUri(uri: String, pkg: String?): Boolean {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (pkg != null) intent.setPackage(pkg)
+        return runCatching { context.startActivity(intent) }.isSuccess
+    }
+
+    override fun volume(): Int = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+    override fun maxVolume(): Int = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+    override fun setVolume(v: Int) = audio.setStreamVolume(AudioManager.STREAM_MUSIC, v, AudioManager.FLAG_SHOW_UI)
+
+    override fun isOnline(): Boolean {
+        val caps = conn.getNetworkCapabilities(conn.activeNetwork) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+}
