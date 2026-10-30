@@ -5,6 +5,8 @@ import app.mergo.model.Clock
 import app.mergo.model.FailReason
 import app.mergo.model.RecipeOutcome
 import app.mergo.service.YouTubeSignals
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -207,11 +209,35 @@ class RecipesTest {
         val device = FakeDevice().apply { online = false; wifiOn = false }
         val toggle = wifiToggle()
         val screen = FakeScreen()
-        device.onOpenPanel = { screen.nodeList = listOf(toggle) }
+        device.onOpenPanel = { screen.nodeList = listOf(toggle); screen.pkg = "com.android.systemui" }
         screen.onClick = { if (it === toggle) { device.wifiOn = true; device.online = true } }
         assertEquals(RecipeOutcome.Verified(), OpenInternetPanel(screen, device).run(emptyMap()))
         assertEquals(listOf(toggle), screen.clicks)
         assertEquals(1, screen.backs)
+    }
+
+    @Test
+    fun `S8 연결을 기다리는 사이 사용자가 패널을 닫았으면 뒤로 가기를 누르지 않는다`() = runTest {
+        val device = FakeDevice().apply { online = false; wifiOn = false }
+        val toggle = wifiToggle()
+        val screen = FakeScreen()
+        device.onOpenPanel = { screen.nodeList = listOf(toggle); screen.pkg = "com.android.systemui" }
+        screen.onClick = { device.wifiOn = true; device.online = true; screen.pkg = "com.google.android.youtube" }
+        assertEquals(RecipeOutcome.Verified(), OpenInternetPanel(screen, device).run(emptyMap()))
+        assertEquals(0, screen.backs)
+    }
+
+    @Test
+    fun `S8 비행기 모드를 끈 뒤 와이파이가 늦게 켜지면 기다렸다가 스위치는 누르지 않는다`() = runTest {
+        val device = FakeDevice().apply { online = false; wifiOn = false }
+        val apm = airplaneButton()
+        val screen = FakeScreen()
+        device.onOpenPanel = { screen.nodeList = listOf(apm, wifiToggle()) }
+        screen.onClick = {
+            if (it === apm) launch { delay(1_800); device.wifiOn = true; delay(500); device.online = true }
+        }
+        assertEquals(RecipeOutcome.Verified(), OpenInternetPanel(screen, device).run(emptyMap()))
+        assertEquals("켜지는 중인 와이파이를 눌러 끄지 않는다", listOf(apm), screen.clicks)
     }
 
     @Test
@@ -226,12 +252,19 @@ class RecipesTest {
     }
 
     @Test
-    fun `S8 와이파이는 켜져 있는데 연결이 안 되면 스위치를 누르지 않고 직접 보도록 안내한다`() = runTest {
+    fun `S8 와이파이는 켜져 있는데 연결이 안 되면 스위치를 누르라고 하지 않고 공유기를 안내한다`() = runTest {
         val device = FakeDevice().apply { online = false; wifiOn = true }
         val screen = FakeScreen()
-        device.onOpenPanel = { screen.nodeList = listOf(wifiToggle()) }
-        assertEquals(RecipeOutcome.Guided("화면에서 와이파이를 눌러 켜 주세요"), OpenInternetPanel(screen, device).run(emptyMap()))
+        device.onOpenPanel = { screen.nodeList = listOf(wifiToggle()); screen.pkg = "com.android.systemui" }
+        assertEquals(RecipeOutcome.Guided("와이파이는 켜져 있는데 인터넷이 안 돼요. 공유기를 확인해 주세요."), OpenInternetPanel(screen, device).run(emptyMap()))
         assertTrue(screen.clicks.isEmpty())
+        assertEquals("열어 둔 패널은 닫는다", 1, screen.backs)
+    }
+
+    @Test
+    fun `S8 와이파이가 꺼져 있는데 스위치를 못 찾으면 직접 켜도록 안내한다`() = runTest {
+        val device = FakeDevice().apply { online = false; wifiOn = false }
+        assertEquals(RecipeOutcome.Guided("화면에서 와이파이를 눌러 켜 주세요"), OpenInternetPanel(FakeScreen(), device).run(emptyMap()))
     }
 
     @Test

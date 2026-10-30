@@ -50,6 +50,7 @@ class MergoController(
     private val familyLog: FamilyLog,
     private val liveVolume: () -> Int,
     private val liveOnline: () -> Boolean,
+    private val liveScreen: () -> LiveScreen = { LiveScreen(null, emptyList()) },
 ) {
     private val busy = AtomicBoolean(false)
 
@@ -60,13 +61,6 @@ class MergoController(
     @Volatile
     private var lastMarkers: Set<Marker> = emptySet()
 
-    /** 지금 앞에 있는 앱과 그 화면의 글자. 민감 화면인지 볼 때 쓴다. */
-    @Volatile
-    private var screenPkg: String? = null
-
-    @Volatile
-    private var screenTexts: List<String> = emptyList()
-
     var log: (String) -> Unit = { runCatching { Log.i("Mergo", it) } }
 
     fun onScreenEvent(raw: ScreenEvent) {
@@ -74,11 +68,6 @@ class MergoController(
         timeline.add(e)
         baseline.onScreen(e)
         if (e.pkg == app.mergo.service.YouTubeSignals.PKG) lastMarkers = e.markers
-        if (e.pkg != OWN_PKG) {
-            if (e.pkg != screenPkg) screenTexts = emptyList()
-            screenPkg = e.pkg
-            if (e.texts.isNotEmpty()) screenTexts = e.texts
-        }
         handle(detector.onEvent(e))
     }
 
@@ -134,7 +123,8 @@ class MergoController(
         if (!busy.compareAndSet(false, true)) return
         detector.suggestionShowing = true
         try {
-            if (SensitiveScreen.matches(screenPkg, screenTexts)) return guideOutOfSensitiveScreen(utterance)
+            val screen = liveScreen()
+            if (SensitiveScreen.matches(screen)) return guideOutOfSensitiveScreen(screen, utterance)
             val said = utterance ?: run {
                 // 머고가 짐작 가는 게 있으면 그것 하나만 먼저 묻는다. 아니라고 하면 선택지를 보여 준다.
                 guess()?.let { g ->
@@ -267,8 +257,8 @@ class MergoController(
     }
 
     /** 설치·결제·개인정보 화면에서는 대신 누르지 않는다. 빠져나오는 법만 알려 주고 가족 알림을 묻는다. */
-    private suspend fun guideOutOfSensitiveScreen(utterance: String?) {
-        log("민감 화면 $screenPkg: 조작하지 않고 안내")
+    private suspend fun guideOutOfSensitiveScreen(screen: LiveScreen, utterance: String?) {
+        log("민감 화면 ${screen.pkg}: 조작하지 않고 안내")
         val tell = confirm(Prompt(SENSITIVE_TITLE, SENSITIVE_BODY, yes = "응, 알려 줘", no = "아니"))
         val notified = tell == YesNo.YES
         familyLog.add(
@@ -356,7 +346,6 @@ class MergoController(
         const val DONE_CHECK_TIMEOUT_MS = 10_000L
         val DONE_CHECK = Prompt("이 화면이 맞나요?", yes = "응, 맞아", no = "아니")
         const val UNCHECKED_LOG = "해결됐는지 확인하지 못했어요"
-        const val OWN_PKG = "app.mergo"
         const val SENSITIVE_RECIPE = "sensitive_screen"
         const val SENSITIVE_TITLE = "여기서는 누르지 않을게요"
         const val SENSITIVE_BODY = "아무것도 누르지 말고 뒤로 가기를 누르세요. 가족에게 알릴까요?"

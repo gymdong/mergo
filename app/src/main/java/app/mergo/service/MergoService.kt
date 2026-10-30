@@ -20,6 +20,7 @@ import android.view.inputmethod.InputMethodManager
 import app.mergo.BuildConfig
 import app.mergo.ai.AndroidVoiceIO
 import app.mergo.ai.MergoAi
+import app.mergo.core.LiveScreen
 import app.mergo.core.MergoController
 import app.mergo.detect.Cooldown
 import app.mergo.detect.DetectorConfig
@@ -133,6 +134,7 @@ class MergoService : AccessibilityService() {
             brain = MergoAi.brain(voice, settings), voice = voice, overlay = overlay, settings = settings,
             familyLog = FamilyLog(File(filesDir, "family_log.json")),
             liveVolume = { device.volume() }, liveOnline = { device.isOnline() },
+            liveScreen = { LiveScreen(screen.currentPackage(), screen.nodes().flatMap { listOfNotNull(it.text, it.desc) }) },
         )
         // 서비스가 앱 사용 도중에 (재)시작돼도 지금 앱을 알도록 활성 창에서 읽어 둔다.
         foreground = screen.currentPackage()?.takeIf { it !in ignored }

@@ -29,6 +29,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -91,8 +92,9 @@ class MergoControllerTest {
                 }
             },
             voice, overlay, DefaultSettings(autoExecute = autoExecute), familyLog,
-            liveVolume = { 8 }, liveOnline = { true },
+            liveVolume = { 8 }, liveOnline = { true }, liveScreen = { liveScreen },
         )
+        var liveScreen = LiveScreen(null, emptyList())
         val suggestion = Suggestion.restoreVideo(RuleId.R1_AUTOPLAY, "트로트 메들리", "autoplay", 0)
     }
 
@@ -323,7 +325,7 @@ class MergoControllerTest {
     @Test
     fun `스토어 화면에서 도와줘를 부르면 아무것도 누르지 않고 빠져나오는 법만 알려 준다`() = runTest {
         val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES, choice = "이거 안 꺼져"))
-        env.controller.onScreenEvent(ScreenEvent(0, "com.android.vending", null, listOf("설치"), false, EventKind.WINDOW_CHANGED))
+        env.liveScreen = LiveScreen("com.android.vending", listOf("설치"))
         env.controller.onHelp()
         assertEquals(listOf("여기서는 누르지 않을게요"), env.overlay.asked)
         assertTrue(env.brainCalls.isEmpty() && env.recipe.calls.isEmpty())
@@ -335,7 +337,7 @@ class MergoControllerTest {
     @Test
     fun `카드번호를 묻는 웹페이지에서도 누르지 않는다`() = runTest {
         val env = Env(this, overlay = FakeOverlay(answer = YesNo.NO, choice = "이거 안 꺼져"))
-        env.controller.onScreenEvent(ScreenEvent(0, "com.android.chrome", null, listOf("택배 주소 확인", "카드 번호 입력"), false, EventKind.WINDOW_CHANGED))
+        env.liveScreen = LiveScreen("com.android.chrome", listOf("택배 주소 확인", "카드 번호 입력"))
         env.controller.onHelp("이거 뭐야")
         assertTrue(env.brainCalls.isEmpty())
         assertEquals(false, env.familyLog.all().single().notified)
@@ -344,9 +346,16 @@ class MergoControllerTest {
     @Test
     fun `평범한 웹페이지면 그대로 판단한다`() = runTest {
         val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES, choice = "이거 안 꺼져"))
-        env.controller.onScreenEvent(ScreenEvent(0, "com.android.chrome", null, listOf("우리 동네 소식"), false, EventKind.WINDOW_CHANGED))
+        env.liveScreen = LiveScreen("com.android.chrome", listOf("우리 동네 소식"))
         env.controller.onHelp()
         assertEquals("이거 안 꺼져", env.brainCalls.single().utterance)
+    }
+
+    @Test
+    fun `와이파이 설정의 비밀번호나 카톡의 인증번호 글자만으로는 민감 화면으로 보지 않는다`() {
+        assertFalse(SensitiveScreen.matches(LiveScreen("com.android.settings", listOf("Wi‑Fi", "비밀번호 저장됨"))))
+        assertFalse(SensitiveScreen.matches(LiveScreen("com.kakao.talk", listOf("[Web발신] 인증번호 [123456]"))))
+        assertTrue(SensitiveScreen.matches(LiveScreen("com.android.chrome", listOf("결제하기"))))
     }
 
     @Test

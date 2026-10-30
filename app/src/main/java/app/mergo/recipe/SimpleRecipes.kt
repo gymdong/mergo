@@ -79,18 +79,36 @@ class OpenInternetPanel(
     override suspend fun run(params: Map<String, String>): RecipeOutcome {
         if (device.isOnline()) return RecipeOutcome.Guided("인터넷은 연결돼 있어요")
         if (!device.openInternetPanel()) return RecipeOutcome.Failed(FailReason.NOT_REACHED)
+        var panelPkg: String? = null
         var acted = false
         find(AIRPLANE_BUTTON)?.let {
+            panelPkg = it.pkg()
             acted = screen.click(it.id)
-            // 비행기 모드를 끄면 패널이 다시 그려지고, 전에 켜 두었던 와이파이는 스스로 켜지기도 한다.
-            delay(1_500)
+            // 비행기 모드를 끄면 전에 켜 두었던 와이파이가 스스로 켜지기도 한다. 그걸 기다린 뒤에 스위치를 볼지 정한다.
+            Verifier.waitUntil(WIFI_SETTLE_MS) { device.isWifiEnabled() }
         }
-        if (!device.isWifiEnabled()) find(WIFI_TOGGLE)?.let { acted = screen.click(it.id) || acted }
+        if (!device.isWifiEnabled()) {
+            // 패널이 다시 그려졌을 수 있어 새로 찾고, 누르기 직전에 한 번 더 확인한다.
+            find(WIFI_TOGGLE)?.takeIf { !device.isWifiEnabled() }?.let {
+                panelPkg = it.pkg()
+                acted = screen.click(it.id) || acted
+            }
+        } else if (!acted) {
+            closePanel(panelPkg ?: find(WIFI_TOGGLE)?.pkg())
+            return RecipeOutcome.Guided("와이파이는 켜져 있는데 인터넷이 안 돼요. 공유기를 확인해 주세요.")
+        }
         if (!acted) return RecipeOutcome.Guided("화면에서 와이파이를 눌러 켜 주세요")
         if (!Verifier.waitUntil(onlineWaitMs) { device.isOnline() }) return RecipeOutcome.Failed(FailReason.NOT_REACHED)
-        screen.back()
+        closePanel(panelPkg)
         return RecipeOutcome.Verified()
     }
+
+    /** 패널이 아직 앞에 있을 때만 닫는다. 사용자가 먼저 닫았으면 뒤로 가기가 엉뚱한 앱을 닫는다. */
+    private fun closePanel(panelPkg: String?) {
+        if (panelPkg != null && screen.currentPackage() == panelPkg) screen.back()
+    }
+
+    private fun NodeSnapshot.pkg(): String? = viewId?.substringBefore(":id/", "")?.takeIf { it.isNotEmpty() }
 
     /** 패널이 뜰 때까지 잠시 기다리며 viewId가 [suffix]로 끝나는 노드를 찾는다. */
     private suspend fun find(suffix: String): NodeSnapshot? {
@@ -103,6 +121,7 @@ class OpenInternetPanel(
 
     private companion object {
         const val AIRPLANE_BUTTON = ":id/apm_button"
+        const val WIFI_SETTLE_MS = 3_000L
         const val WIFI_TOGGLE = ":id/wifi_toggle"
     }
 }

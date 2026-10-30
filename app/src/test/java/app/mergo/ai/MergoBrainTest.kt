@@ -105,6 +105,14 @@ class MergoBrainTest {
     }
 
     @Test
+    fun `소리와 인터넷을 함께 말하면 볼륨이 켜져 있다는 것도 알려 준다`() = runTest {
+        val offline = BrainContext("소리도 안 나고 인터넷도 안 돼", emptyList(), emptyList(), Baseline("launcher", null, 8, false, 0), false)
+        val decision = MergoBrain(ScriptedLlm(), RecordingVoice()).decide(offline)
+        assertEquals(RecipeIds.OPEN_INTERNET_PANEL, decision.recipe)
+        assertEquals("소리는 켜져 있어요. 인터넷을 다시 연결해 볼까요?", decision.say)
+    }
+
+    @Test
     fun `볼륨이 줄어든 거면 0이 아니어도 되돌린다`() = runTest {
         assertEquals(RecipeIds.SET_VOLUME, MergoBrain(ScriptedLlm(), RecordingVoice()).decide(ctx("소리가 작아졌어", listOf("볼륨: 8 → 3"), volume = 3)).recipe)
     }

@@ -42,7 +42,9 @@ class AndroidDevice(
             caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
-    override fun isWifiEnabled(): Boolean = wifi?.isWifiEnabled == true
+    // 비행기 모드를 끈 직후에는 켜지는 중(ENABLING)이다. 이때도 켜진 것으로 봐야 스위치를 눌러 도로 끄지 않는다.
+    override fun isWifiEnabled(): Boolean =
+        wifi?.wifiState.let { it == WifiManager.WIFI_STATE_ENABLED || it == WifiManager.WIFI_STATE_ENABLING }
 
     override fun openInternetPanel(): Boolean {
         val intent = Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

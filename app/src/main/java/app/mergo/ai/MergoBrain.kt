@@ -26,7 +26,11 @@ class MergoBrain(
         log("brain keyword candidates=${match.candidates} outOfScope=${match.outOfScope}")
         if (match.outOfScope) return outOfScope()
         if (match.soundButAudible && match.candidates.isEmpty()) return soundIsOn()
-        match.candidates.singleOrNull()?.let { return decisionFor(it, ctx) }
+        match.candidates.singleOrNull()?.let { recipe ->
+            val decision = decisionFor(recipe, ctx)
+            // "소리도 안 나고 인터넷도 안 돼"처럼 함께 말한 소리 문제를 버리지 않는다.
+            return if (match.soundButAudible) decision.copy(say = "소리는 켜져 있어요. ${decision.say}") else decision
+        }
 
         val fromLlm = askLlm(ctx)?.let { guard(it, ctx, match) }
         log("brain llm decision=$fromLlm")
