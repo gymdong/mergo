@@ -37,6 +37,10 @@ class StuckDetector(
     private var pendingR2: PendingR2? = null
     private var r3: R3Window? = null
     private var quietUntil = Long.MIN_VALUE / 2
+
+    /** 영상이 바뀐 뒤 말로 되돌릴 수 있는 유예 창. 대상은 정상 상태 영상이다. */
+    data class Grace(val target: String, val mode: String, val until: Long)
+    private var grace: Grace? = null
     private var adFirstSeen: Long? = null
     private var adLastSeen = Long.MIN_VALUE / 2
     private var adSuggested = false
@@ -136,9 +140,21 @@ class StuckDetector(
         quietUntil = now + quietMs
     }
 
+    /** 지금 열려 있는 유예 창. 시간이 지났거나 이미 정상 상태 영상으로 돌아왔으면 null. */
+    @Synchronized
+    fun grace(now: Long = clock.now()): Grace? {
+        val g = grace ?: return null
+        if (now > g.until || ytTitle == g.target) {
+            grace = null
+            return null
+        }
+        return g
+    }
+
     /** 진행 중이던 판단을 모두 비운다. */
     @Synchronized
     fun reset() {
+        grace = null
         pendingR1 = null
         pendingR2 = null
         r3 = null
@@ -154,6 +170,9 @@ class StuckDetector(
         // 에뮬레이터 확인(2026-10-30): YouTube 플레이어 탭은 클릭 이벤트가 오지 않는다. 그래서 '터치가 있었다'는 증거로
         // 쓸 수 없고, 카운트다운이 있으면 자동재생, 없으면 사용자가 바꾼 것으로 본다.
         val autoplay = if (config.requireCountdown) countdownSeen && noTouch else noTouch
+        if (baseline != null && baseline != new) {
+            grace = Grace(baseline, if (autoplay) "autoplay" else "mistouch", ts + config.graceMs)
+        }
         if (autoplay) {
             // R1: 이전 영상이 정상 상태(30초 이상 본 영상)여야 한다.
             if (baseline != null && baseline == prev) pendingR1 = PendingR1(prev, ts)

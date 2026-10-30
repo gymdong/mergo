@@ -26,6 +26,35 @@ class YouTubeSignalsTest {
     }
 
     @Test
+    fun `에뮬레이터 실측 광고 화면 - 글자 없는 skip_ad_button을 찾고, 건너뛰기 전 카운트다운은 버튼이 아니다`() {
+        val yt = YouTubeSignals.PKG
+        val player = NodeSnapshot(1, null, "Video player", "$yt:id/watch_player", false, Rect4(0, 63, 1080, 671), true)
+        val countdown = NodeSnapshot(2, "5", "5 seconds to skip ad", "$yt:id/countdown_text", true, Rect4(850, 471, 910, 555), true)
+        val progress = NodeSnapshot(3, "Sponsored · 1:46", null, "$yt:id/ad_progress_text", true, Rect4(27, 560, 315, 655), true)
+        val adPanel = NodeSnapshot(4, "Meet Grok Bot", null, null, true, Rect4(84, 700, 819, 780), true)
+        val before = listOf(player, countdown, progress, adPanel)
+        assertEquals(setOf(Marker.VIDEO_PLAYER, Marker.AD_SHOWING), YouTubeSignals.markers(before))
+        assertEquals("광고 중에는 광고 패널 글자를 제목으로 읽지 않는다", null, YouTubeSignals.title(before))
+
+        val button = NodeSnapshot(5, null, null, "$yt:id/skip_ad_button", true, Rect4(882, 450, 1080, 576), true)
+        val container = NodeSnapshot(6, null, "Skip ad", "$yt:id/skip_ad_button_container", false, Rect4(882, 471, 1059, 555), true)
+        val text = NodeSnapshot(7, "Skip", null, "$yt:id/skip_ad_button_text", false, Rect4(914, 491, 996, 534), true)
+        val after = listOf(player, progress, button, container, text)
+        assertTrue(Marker.AD_SKIP_VISIBLE in YouTubeSignals.markers(after))
+        assertEquals(listOf(button), after.filter { YouTubeSignals.isSkipButton(it, player) })
+    }
+
+    @Test
+    fun `조회수 줄은 제목으로 읽지 않는다`() {
+        val yt = YouTubeSignals.PKG
+        val nodes = listOf(
+            NodeSnapshot(1, null, "Video player", "$yt:id/watch_player", false, Rect4(0, 63, 1080, 670), true),
+            NodeSnapshot(2, "6.1B views", null, null, false, Rect4(0, 700, 400, 740), true),
+        )
+        assertEquals(null, YouTubeSignals.title(nodes))
+    }
+
+    @Test
     fun `화면 신호를 뽑는다`() {
         val nodes = listOf(
             node(text = "다음 동영상", clickable = false),

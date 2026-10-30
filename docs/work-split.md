@@ -30,8 +30,11 @@
 | `Screen.kt` | `ScreenReader`(nodes, click, tap, back, currentPackage), `ScreenAgent`(achieve) | ScreenReader=A, **ScreenAgent=B** | B / A |
 | `Settings.kt` | `SettingsSource`(autoExecute, wakeWord) | **B** | A |
 | `Clock.kt` | 시간 주입 | - | A·B |
+| `Grace.kt` | `GraceListener`(open/close), `GracePhrases`(알아들을 문장) — 영상이 바뀐 뒤 30초 동안 "머고야 잘못 눌렀다" 같은 말을 듣는 유예 창 | **B** (Vosk, 문법 제한) | A(Controller가 열고 닫음) |
 
-**B가 교체할 곳:** `service/MergoService.kt`의 조립부에서 `ChoiceBrain`, `SilentVoice`, `NoAgent`, `DefaultSettings`(모두 `core/fakes/`)를 진짜 구현으로 바꾼다. `ScreenAgent`에는 `AccessibilityScreen`(ScreenReader 구현)을 넘기면 된다.
+**B가 만들 것 (유예 듣기):** `GraceListener`를 Vosk로 구현한다. 영상 소리가 마이크로 들어오므로 자유 받아쓰기(SpeechRecognizer)를 쓰지 말고 `GracePhrases.DEFAULT` 문장(+호출어)만 문법으로 제한한다. 들은 문장을 `onHeard`로 넘기면 A가 확인 없이 이전 영상으로 되돌린다. 엔진 없이 시험하려면 디버그 빌드에서 `adb shell am broadcast -a app.mergo.DEBUG_HEAR --es text "'잘못 눌렀다'" -p app.mergo`를 쓴다(도와줘 흐름은 `--ez help true` 추가).
+
+**B가 교체할 곳:** `service/MergoService.kt`의 조립부에서 `ChoiceBrain`, `SilentVoice`, `NoAgent`, `DefaultSettings`, `NoGraceListener`(모두 `core/fakes/`)를 진짜 구현으로 바꾼다. `ScreenAgent`에는 `AccessibilityScreen`(ScreenReader 구현)을 넘기면 된다.
 
 3. **연결 지점(Orchestrator, A 소유)**: `core/MergoController`가 아래 두 흐름을 맡는다. B의 `Brain`·`VoiceIO`·`ScreenAgent`는 생성자로 주입받는다.
    - 감지 흐름: `StuckDetector`의 제안 → 말풍선과 `VoiceIO.listenYesNo` → 레시피 체인 → `Verifier` → 실패하면 FamilyLog
@@ -128,9 +131,10 @@
 | N1 직접 다음 영상 고르고 계속 시청 | ✅ | 제안 0회 |
 | 영상 제목 | ✅ MediaSession | 노드 대안: 플레이어 바로 아래 첫 글자 (viewId 없음) |
 | 이전 동영상 버튼 | ✅ | `player_control_previous_button`, desc "Previous video" |
-| **시청 기록에서 복원** | ⚠️ 미검증 | 기록 링크는 열리나 이 에뮬레이터는 Google 로그인이 깨져 목록이 안 보임. **로그인된 기기에서 확인 필요** |
+| 시청 기록에서 복원 | ✅ | Google 로그인 후 확인. 기록 화면에서 제목으로 찾아 눌러 1.4초에 복원. **로그인이 안 되어 있으면 이 경로는 실패한다(시연 기기는 로그인 필수)** |
 | **뒤로 가기 연타(R3)** | ⚠️ 미검증 | adb 가상 키는 접근성 키 필터를 거치지 않아 확인 불가. 실기기·3버튼 내비게이션에서 확인 필요 |
-| S11 광고 건너뛰기 | ⚠️ 미검증 | 검증 중 건너뛰기 광고가 나오지 않음 |
+| S11 광고 감지(R4) → 제안 → 건너뛰기 | ✅ | 건너뛰기 버튼이 뜨고 5초 뒤 제안, 1.02초에 넘김. 버튼은 viewId `skip_ad_button`(글자 없음), 광고 표시는 `ad_progress_text`("Sponsored · 1:46"), 건너뛰기 전 `countdown_text`는 버튼으로 보지 않음 |
+| 유예 듣기 → 말로 복원 | ✅ (연결부) | 영상 변경 시 30초 창 열림 → 디버그 방송 "머고야 잘못 눌렀다" → 확인 없이 시청 기록으로 원래 영상 복원(1.4초). 실제 음성 엔진은 B |
 
 검증하며 고친 것:
 - **판정 기준:** YouTube 플레이어 탭은 클릭 이벤트가 오지 않는다. 그래서 '카운트다운이 있으면 자동재생, 없으면 사용자 선택'으로 판정한다.
@@ -139,4 +143,6 @@
 - **플레이어 노드:** `watch_player`만 쓴다. 화면 전체 컨테이너를 플레이어로 오인해 댓글 창을 연 문제를 고쳤다.
 - **시청 기록 정리:** 실패 후 정리는 기록 화면이 실제로 열렸을 때만 뒤로 간다. 영상 화면을 닫아 버린 문제를 고쳤다.
 - **광고 판정:** 광고·건너뛰기는 플레이어 영역 안의 노드만 본다. 추천 목록의 'Sponsored' 카드와 제목에 'Skip'이 든 영상을 오인하지 않는다.
+- **광고 판정:** 건너뛰기는 viewId로 찾고, 광고 중에는 노드에서 제목을 읽지 않는다. 광고 문구와 "6.1B views"가 영상 제목으로 들어가던 문제를 고쳤다.
+- **디버그 명령:** 화면을 건드리지 않고 덤프하는 `adb shell am broadcast -a app.mergo.DEBUG_DUMP -p app.mergo`를 추가했다.
 - **볼륨:** 머고가 바꾼 게 아니면 볼륨 변화를 사용자 동작으로 본다(가상 키 미수신 대응). 볼륨 변화는 시스템 방송으로도 받는다.

@@ -18,6 +18,7 @@ data class DetectorConfig(
     val r2WaitMs: Long = 20_000L,                // R2: 홈에서 20초
     val r2RecentVideoMs: Long = 10_000L,         // R2: 홈으로 나가기 직전까지 영상을 보던 중
     val r3WindowMs: Long = 30_000L,              // R3: 바뀐 뒤 30초 관찰
+    val graceMs: Long = 30_000L,                 // 영상이 바뀐 뒤 '잘못 눌렀다' 같은 말을 듣는 유예
     val r3BackCount: Int = 2,                    // R3: 뒤로 가기 2회 이상
     val r3BackWithinMs: Long = 3_000L,           //     3초 안에
     val r4WaitMs: Long = 5_000L,                 // R4: 건너뛰기 버튼이 5초 보이고 무동작

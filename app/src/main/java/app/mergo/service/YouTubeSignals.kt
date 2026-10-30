@@ -28,9 +28,16 @@ object YouTubeSignals {
     /** 카운트다운 화면에는 자동재생을 멈추는 '취소' 버튼이 함께 뜬다. 플레이어의 '다음 동영상' 버튼과 구분하는 근거다. */
     val countdownCancel = Regex("^(취소|Cancel)$")
     val previousVideo = Regex("^(이전 동영상|이전 영상|Previous video)$")
-    val skipAd = Regex("건너뛰기|Skip")
+    /**
+     * 에뮬레이터 확인(2026-10-30, 영어 UI): 실제 버튼은 viewId `skip_ad_button`(클릭 가능, 글자 없음)이고,
+     * 글자("Skip", desc "Skip ad")는 클릭이 안 되는 자식·틀 노드에 있다. 건너뛰기 전에는 `countdown_text`
+     * (desc "5 seconds to skip ad", 클릭 가능)가 뜨므로 'skip' 글자만으로 찾으면 안 된다.
+     */
+    val skipButtonViewIds = setOf("$PKG:id/skip_ad_button")
+    val skipAd = Regex("^(건너뛰기|광고 건너뛰기|Skip|Skip ad|Skip ads)$")
+    val adViewIds = setOf("$PKG:id/ad_progress_text", "$PKG:id/skip_ad_button", "$PKG:id/countdown_text")
     // 추천 목록의 'Sponsored' 카드와 구분하려고, 광고·건너뛰기는 플레이어 영역 안의 노드만 본다.
-    val adShowing = Regex("^(광고|Ad)( ·.*)?$|^광고 \\d|^Ad \\d")
+    val adShowing = Regex("^(광고|Ad|Sponsored)( ·.*)?$|^광고 \\d|^Ad \\d")
     val playPause = Regex("^(재생|일시중지|일시 중지|Play video|Pause video|Play|Pause)$")
 
     /** 위험한 버튼에 스킵 패턴이 우연히 걸리지 않게 막는다. */
@@ -43,13 +50,17 @@ object YouTubeSignals {
     fun title(nodes: List<NodeSnapshot>): String? {
         nodes.firstOrNull { it.viewId in titleViewIds && !it.text.isNullOrBlank() }?.text?.trim()?.let { return it }
         val player = playerNode(nodes) ?: return null
+        if (nodes.any { it.viewId in adViewIds }) return null  // 광고 중에는 광고 패널 글자가 제목처럼 보인다
         return nodes.filter { n ->
-            !n.text.isNullOrBlank() && n.text.length >= 4 &&
+            !n.text.isNullOrBlank() && n.text.length >= 4 && !metaText.containsMatchIn(n.text) &&
                 n.bounds.t >= player.bounds.b && n.bounds.t - player.bounds.b <= TITLE_GAP_PX
         }.minByOrNull { it.bounds.t }?.text?.trim()
     }
 
     private const val TITLE_GAP_PX = 160
+
+    /** 제목 아래 조회수·날짜 줄. 예: "6.1B views", "조회수 52만회" */
+    private val metaText = Regex("views|조회수|subscribers|구독자")
 
     fun markers(nodes: List<NodeSnapshot>): Set<Marker> {
         val out = mutableSetOf<Marker>()
@@ -62,7 +73,7 @@ object YouTubeSignals {
             if (n.text?.let(countdown::containsMatchIn) == true) countdownText = true
             if (listOfNotNull(n.text, n.desc).any { countdownCancel.matches(it.trim()) }) cancel = true
             if (isSkipButton(n, player)) out += Marker.AD_SKIP_VISIBLE
-            if (inPlayer(n, player) &&
+            if (n.viewId in adViewIds || inPlayer(n, player) &&
                 (n.text?.let { adShowing.containsMatchIn(it.trim()) } == true || n.desc?.let { adShowing.containsMatchIn(it.trim()) } == true)
             ) {
                 out += Marker.AD_SHOWING
@@ -77,9 +88,10 @@ object YouTubeSignals {
 
     /** 건너뛰기 버튼: 짧은 글자(영상 제목에 'Skip'이 들어간 추천 카드 제외), 플레이어를 알면 그 안에 있어야 한다. */
     fun isSkipButton(n: NodeSnapshot, player: NodeSnapshot? = null): Boolean {
-        val label = listOfNotNull(n.text, n.desc).joinToString(" ")
-        return n.clickable && n.visible && label.length <= 30 && inPlayer(n, player) &&
-            skipAd.containsMatchIn(label) && !notSkip.containsMatchIn(label)
+        if (!n.clickable || !n.visible) return false
+        if (n.viewId in skipButtonViewIds) return true
+        val label = listOfNotNull(n.text, n.desc).map { it.trim() }
+        return inPlayer(n, player) && label.any { skipAd.matches(it) } && label.none { notSkip.containsMatchIn(it) }
     }
 
     /** 플레이어를 모르면(테스트·전체화면 등) 제한하지 않는다. */

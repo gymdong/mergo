@@ -17,10 +17,12 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.inputmethod.InputMethodManager
+import app.mergo.BuildConfig
 import app.mergo.core.MergoController
 import app.mergo.core.fakes.ChoiceBrain
 import app.mergo.core.fakes.DefaultSettings
 import app.mergo.core.fakes.NoAgent
+import app.mergo.core.fakes.NoGraceListener
 import app.mergo.core.fakes.SilentVoice
 import app.mergo.detect.Cooldown
 import app.mergo.detect.DetectorConfig
@@ -71,6 +73,7 @@ class MergoService : AccessibilityService() {
     private var lastMediaTitle: String? = null
     private var volumeObserver: ContentObserver? = null
     private var volumeReceiver: BroadcastReceiver? = null
+    private var debugReceiver: BroadcastReceiver? = null
     private var netCallback: ConnectivityManager.NetworkCallback? = null
 
     override fun onServiceConnected() {
@@ -123,11 +126,13 @@ class MergoService : AccessibilityService() {
             brain = ChoiceBrain(), voice = voice, overlay = overlay, settings = DefaultSettings(),
             familyLog = FamilyLog(File(filesDir, "family_log.json")),
             liveVolume = { device.volume() }, liveOnline = { device.isOnline() },
+            grace = NoGraceListener(),
         )
         // 서비스가 앱 사용 도중에 (재)시작돼도 지금 앱을 알도록 활성 창에서 읽어 둔다.
         foreground = screen.currentPackage()?.takeIf { it !in ignored }
         overlay.showHelpButton()
         watchDeviceState()
+        if (BuildConfig.DEBUG) registerDebugHear()
         controller.onDeviceState(device.volume(), device.isOnline(), userAction = false)
 
         scope.launch {
@@ -197,6 +202,7 @@ class MergoService : AccessibilityService() {
         if (::overlay.isInitialized) overlay.removeAll()
         volumeObserver?.let { contentResolver.unregisterContentObserver(it) }
         volumeReceiver?.let { runCatching { unregisterReceiver(it) } }
+        debugReceiver?.let { runCatching { unregisterReceiver(it) } }
         netCallback?.let { runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } }
         scope.cancel()
         super.onDestroy()
@@ -260,6 +266,29 @@ class MergoService : AccessibilityService() {
         netCallback = cb
     }
 
+    /**
+     * 디버그 빌드 전용: 음성 엔진 없이 '들은 문장'을 넣어 유예 듣기·도와줘 흐름을 시험한다.
+     * `adb shell am broadcast -a app.mergo.DEBUG_HEAR --es text "잘못 눌렀다" -p app.mergo`
+     * `adb shell am broadcast -a app.mergo.DEBUG_HEAR --es text "소리가 안 나" --ez help true -p app.mergo`
+     */
+    private fun registerDebugHear() {
+        val rc = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action == DEBUG_DUMP) {
+                    dumpForDebug()
+                    return
+                }
+                val text = intent.getStringExtra("text") ?: return
+                log("디버그 듣기: $text")
+                scope.launch {
+                    if (intent.getBooleanExtra("help", false)) controller.onHelp(text) else controller.onGraceHeard(text)
+                }
+            }
+        }
+        registerReceiver(rc, IntentFilter(DEBUG_HEAR).apply { addAction(DEBUG_DUMP) }, Context.RECEIVER_EXPORTED)
+        debugReceiver = rc
+    }
+
     /** 도와줘 버튼을 길게 누르면 사전 검증용으로 화면 노드와 최근 기록을 파일로 남긴다. */
     private fun dumpForDebug() {
         val dir = getExternalFilesDir(null) ?: filesDir
@@ -275,6 +304,9 @@ class MergoService : AccessibilityService() {
     private companion object {
         const val UNKNOWN_PKG = "unknown"
         const val VOLUME_CHANGED_ACTION = "android.media.VOLUME_CHANGED_ACTION"
+        const val DEBUG_HEAR = "app.mergo.DEBUG_HEAR"
+        /** 디버그: 화면을 건드리지 않고 노드·기록 덤프. `adb shell am broadcast -a app.mergo.DEBUG_DUMP -p app.mergo` */
+        const val DEBUG_DUMP = "app.mergo.DEBUG_DUMP"
         val USER_KINDS = setOf(EventKind.CLICK, EventKind.SCROLL, EventKind.TOUCH, EventKind.KEY, EventKind.BACK)
     }
 }

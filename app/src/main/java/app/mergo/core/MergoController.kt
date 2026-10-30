@@ -11,6 +11,8 @@ import app.mergo.model.Baseline
 import app.mergo.model.Brain
 import app.mergo.model.BrainContext
 import app.mergo.model.Clock
+import app.mergo.model.GraceListener
+import app.mergo.model.GracePhrases
 import app.mergo.model.Marker
 import app.mergo.model.Recipe
 import app.mergo.model.RecipeIds
@@ -48,7 +50,10 @@ class MergoController(
     private val familyLog: FamilyLog,
     private val liveVolume: () -> Int,
     private val liveOnline: () -> Boolean,
+    private val grace: GraceListener,
 ) {
+    private var openGrace: StuckDetector.Grace? = null
+
     private val busy = AtomicBoolean(false)
 
     @Volatile
@@ -77,6 +82,40 @@ class MergoController(
         val now = clock.now()
         baseline.tick(now)
         handle(detector.tick(now))
+        syncGrace(now)
+    }
+
+    /** 감지기의 유예 창 상태에 맞춰 듣기를 열고 닫는다. */
+    private fun syncGrace(now: Long) {
+        val g = if (automating) null else detector.grace(now)
+        if (g == openGrace) return
+        openGrace = g
+        if (g == null) {
+            grace.close()
+        } else {
+            log("유예 듣기 열림 ${g.mode} target=${g.target} ${g.until - now}ms")
+            grace.open(g.until - now) { heard -> scope.launch { onGraceHeard(heard) } }
+        }
+    }
+
+    /** 유예 창에서 '잘못 눌렀다' 같은 말을 들으면 확인 없이 바로 이전 영상으로 되돌린다. */
+    suspend fun onGraceHeard(heard: String) {
+        val g = detector.grace(clock.now()) ?: return
+        if (!GracePhrases.matches(heard)) {
+            log("유예 듣기: 해당 없는 말 '$heard'")
+            return
+        }
+        if (!busy.compareAndSet(false, true)) return
+        detector.suggestionShowing = true
+        try {
+            log("유예 듣기: '$heard' → ${g.target}")
+            grace.close()
+            openGrace = null
+            execute(RecipeIds.RESTORE_VIDEO, mapOf("title" to g.target, "mode" to g.mode), heard)
+        } finally {
+            detector.suggestionShowing = false
+            busy.set(false)
+        }
     }
 
     private fun handle(suggestions: List<Suggestion>) {
