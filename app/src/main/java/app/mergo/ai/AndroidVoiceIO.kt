@@ -66,13 +66,20 @@ class AndroidVoiceIO(context: Context) : VoiceIO {
         val language = tts.setLanguage(Locale.KOREAN)
         if (language < TextToSpeech.LANG_AVAILABLE) Log.w(TAG, "TTS 한국어 음성 없음: $language")
         val started = SystemClock.elapsedRealtime()
-        suspendCancellableCoroutine { cont ->
-            val id = UUID.randomUUID().toString()
-            speaking[id] = cont
-            cont.invokeOnCancellation { if (speaking.remove(id) != null) tts.stop() }
-            if (tts.speak(text, TextToSpeech.QUEUE_ADD, null, id) != TextToSpeech.SUCCESS) {
-                speaking.remove(id)?.resume(Unit)
+        // TTS 엔진이 죽으면 onDone·onError가 오지 않는다. 기다리기만 하면 Controller가 바쁜 상태로 멈춘다.
+        val finished = withTimeoutOrNull(SPEAK_BASE_MS + SPEAK_PER_CHAR_MS * text.length) {
+            suspendCancellableCoroutine { cont ->
+                val id = UUID.randomUUID().toString()
+                speaking[id] = cont
+                cont.invokeOnCancellation { if (speaking.remove(id) != null) tts.stop() }
+                if (tts.speak(text, TextToSpeech.QUEUE_ADD, null, id) != TextToSpeech.SUCCESS) {
+                    speaking.remove(id)?.resume(Unit)
+                }
             }
+        }
+        if (finished == null) {
+            Log.w(TAG, "TTS 응답 없음 ${SystemClock.elapsedRealtime() - started}ms, 건너뜀: $text")
+            return
         }
         Log.d(TAG, "TTS ${SystemClock.elapsedRealtime() - started}ms: $text")
     }
@@ -132,5 +139,9 @@ class AndroidVoiceIO(context: Context) : VoiceIO {
     private companion object {
         const val TAG = "Mergo"
         const val TTS_INIT_MS = 3_000L
+
+        // 한국어 TTS는 한 글자에 약 0.2초. 넉넉히 잡아 정상 재생은 끊지 않는다.
+        const val SPEAK_BASE_MS = 3_000L
+        const val SPEAK_PER_CHAR_MS = 300L
     }
 }
