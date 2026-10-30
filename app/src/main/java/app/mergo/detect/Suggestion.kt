@@ -14,14 +14,15 @@ data class Suggestion(
     val createdAt: Long,
     /** 말풍선의 큰 제목. 예: "영상이 바뀐 것 같아요" */
     val headline: String = "도와드릴까요?",
-    val yesLabel: String = "예, 도와주세요",
-    val noLabel: String = "아니요, 괜찮아요",
+    /** 어르신이 누르는 답은 어르신의 말이라 반말로 쓴다("도와줘" 버튼과 같은 말투). */
+    val yesLabel: String = "응, 도와줘",
+    val noLabel: String = "아니, 괜찮아",
 ) {
     companion object {
         fun restoreVideo(rule: RuleId, title: String, mode: String, now: Long) = Suggestion(
             rule, title, RecipeIds.RESTORE_VIDEO, mapOf("title" to title, "mode" to mode),
             "아까 보시던 영상으로 돌아갈까요?", now, headline = "영상이 바뀐 것 같아요",
-            yesLabel = "예, 돌아가 주세요", noLabel = "아니요, 지금 볼게요",
+            yesLabel = "응, 돌아가 줘", noLabel = "아니, 이거 볼래",
         )
     }
 }

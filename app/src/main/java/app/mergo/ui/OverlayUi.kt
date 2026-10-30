@@ -239,14 +239,12 @@ class OverlayUi(
         val box = sheetContainer(DEEP_GREEN)
         box.addView(label("듣고 있어요", 18f, LIME, center = true))
         box.addView(label(prompt, 28f, Color.WHITE, center = true).apply { setPadding(0, dp(4), 0, dp(4)) })
-        box.addView(label("편하게 말씀하세요. 짧게 말해도 알아들을게요.", 18f, Color.parseColor("#CFE0D6"), center = true).apply {
-            setPadding(0, 0, 0, dp(16))
-        })
+        box.addView(View(service), LinearLayout.LayoutParams(1, dp(12)))
         for (c in choices) {
             box.addView(secondaryButton(c, Color.WHITE, Color.parseColor("#5E8A79")) { removeSheet(); onPick(c) }, buttonLp(false))
         }
         // 잘못 눌러 열었을 때 바로 빠져나갈 수 있게, 닫기도 테두리가 보이는 큰 버튼으로 둔다.
-        box.addView(secondaryButton("괜찮아요, 닫을게요", LIME, LIME) { removeSheet(); onPick(null) }, buttonLp(false))
+        box.addView(secondaryButton("괜찮아, 닫아 줘", LIME, LIME) { removeSheet(); onPick(null) }, buttonLp(false))
         // 패널 바깥은 어둡게 덮는다. 바깥을 누르면 닫기만 하고, 그 터치가 아래 앱을 누르지 않게 한다.
         box.isClickable = true
         val scrim = FrameLayout(service).apply {

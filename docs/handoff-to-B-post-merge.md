@@ -28,6 +28,7 @@
 
 - **호출어 뒤 문장은 `controller.onHelp(text)`로 넘긴다.** 유예 듣기 경로(`onGraceHeard`)는 없어졌다.
 - **`onHelp`는 시작할 때 `detector.resumeSuggestions()`를 부른다.** 직접 불렀다는 것은 사용자가 깨어 있다는 뜻이라, 무응답으로 멈춘 자동 제안을 다시 켠다. 호출어 경로도 `onHelp`를 거치면 따로 할 일은 없다.
+- **도와줘 흐름 변경(`b6f41ff` 이후):** 도와줘를 누르면 짐작 가는 도움 하나를 먼저 `confirm()`으로 묻는다. 이 단계의 음성은 `listenYesNo()`라서, 어르신이 "응/아니" 대신 다른 문제를 말하면 못 알아듣고 버튼을 기다린다. 호출어 경로(`onHelp(text)`)는 문장이 이미 있으니 짐작 단계를 건너뛴다. 답 버튼 문구는 모두 반말로 바꿨다("응, 맞아", "아니").
 - **디버그 방송:** `adb shell am broadcast -a app.mergo.DEBUG_HEAR --es text "소리가 안 나" -p app.mergo`가 이제 항상 `onHelp(text)`로 간다. `--ez help true`는 필요 없다.
 - **상시 듣기를 넣을 때 같이 정할 것**(A 의견):
   - 하루 종일 켜 둘 수 있는 배터리 소모

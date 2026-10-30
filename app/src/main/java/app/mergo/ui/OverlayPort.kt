@@ -7,8 +7,8 @@ data class Prompt(
     val title: String,
     val body: String? = null,
     val eyebrow: String? = null,
-    val yes: String = "예",
-    val no: String = "아니요",
+    val yes: String = "응",
+    val no: String = "아니",
 )
 
 /** 화면 위 말풍선·버튼. 접근성 오버레이가 구현하고, 테스트에서는 가짜로 바꾼다. */

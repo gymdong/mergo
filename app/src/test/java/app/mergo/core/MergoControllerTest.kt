@@ -273,6 +273,52 @@ class MergoControllerTest {
         assertEquals("빠진 제목은 정상 상태로 채운다(없으면 빈 값)", "", env.recipe.calls.single()["title"])
     }
 
+    /** 영상 가를 35초 본 뒤(정상 상태) 직접 영상 나를 골라, 지금 화면 제목만 바뀐 상황. */
+    private suspend fun TestScope.videoChanged(env: Env) {
+        env.baseline.onDevice(8, true, 0)
+        env.play(1_000, "영상 가")
+        repeat(40) { delay(1_000); env.controller.tick() }
+        env.play(testScheduler.currentTime, "영상 나")
+        env.controller.tick()
+    }
+
+    @Test
+    fun `도와줘를 누르면 짐작 가는 것 하나를 먼저 묻고, 응이면 선택지 없이 바로 되돌린다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES))
+        videoChanged(env)
+        env.controller.onHelp()
+        assertEquals("보던 거 다시 틀까요?", env.overlay.asked.first())
+        assertEquals(listOf(mapOf("title" to "영상 가")), env.recipe.calls)
+        assertTrue("판단을 다시 하지 않는다", env.brainCalls.isEmpty())
+    }
+
+    @Test
+    fun `짐작이 아니라고 하면 선택지를 보여 주고 고른 것으로 판단한다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES, choice = "소리가 안 나", answers = mapOf("보던 거 다시 틀까요?" to YesNo.NO)))
+        videoChanged(env)
+        env.controller.onHelp()
+        assertEquals("소리가 안 나", env.brainCalls.single().utterance)
+    }
+
+    @Test
+    fun `짐작에 답이 없으면 선택지도 띄우지 않고 닫는다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = null, choice = "소리가 안 나"))
+        videoChanged(env)
+        env.controller.onHelp()
+        assertTrue(env.recipe.calls.isEmpty() && env.brainCalls.isEmpty())
+    }
+
+    @Test
+    fun `바뀐 게 없으면 짐작 없이 바로 선택지를 보여 준다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES, choice = "아까 보던 거"))
+        env.baseline.onDevice(8, true, 0)
+        env.play(1_000, "영상 가")
+        repeat(40) { delay(1_000); env.controller.tick() }
+        env.controller.onHelp()
+        assertTrue("보던 거 다시 틀까요?" !in env.overlay.asked)
+        assertEquals("아까 보던 거", env.brainCalls.single().utterance)
+    }
+
     @Test
     fun `Brain이 되묻기로 답하면 실행하지 않고 말만 한다`() = runTest {
         val env = Env(

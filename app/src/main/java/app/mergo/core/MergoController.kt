@@ -122,7 +122,21 @@ class MergoController(
         if (!busy.compareAndSet(false, true)) return
         detector.suggestionShowing = true
         try {
-            val said = utterance ?: askWhatHappened() ?: run {
+            val said = utterance ?: run {
+                // 머고가 짐작 가는 게 있으면 그것 하나만 먼저 묻는다. 아니라고 하면 선택지를 보여 준다.
+                guess()?.let { g ->
+                    log("도와줘 추측: ${g.recipeId} ${g.params}")
+                    when (confirm(g.prompt)) {
+                        YesNo.YES -> return execute(g.recipeId, g.params, g.prompt.title)
+                        YesNo.NONE -> {
+                            overlay.dismiss()
+                            return
+                        }
+                        YesNo.NO -> Unit
+                    }
+                }
+                askWhatHappened()
+            } ?: run {
                 overlay.dismiss()
                 return
             }
@@ -135,7 +149,7 @@ class MergoController(
                 return
             }
             if (decision.confirm && !settings.autoExecute) {
-                if (confirm(Prompt(decision.say, eyebrow = "머고", yes = "예, 해 주세요", no = "아니요")) != YesNo.YES) {
+                if (confirm(Prompt(decision.say, eyebrow = "머고", yes = "응, 해 줘", no = "아니")) != YesNo.YES) {
                     voice.speak("알겠어요")
                     return
                 }
@@ -221,7 +235,7 @@ class MergoController(
         val tellFamily = if (settings.autoExecute) {
             YesNo.YES
         } else {
-            confirm(Prompt("제가 해결하지 못했어요", "가족에게 알릴까요?", yes = "예, 알려 주세요", no = "아니요"))
+            confirm(Prompt("제가 해결하지 못했어요", "가족에게 알릴까요?", yes = "응, 알려 줘", no = "아니"))
         }
         val notified = tellFamily == YesNo.YES
         record(resolved = false, summary = text.failLog, notified = notified)
@@ -234,6 +248,28 @@ class MergoController(
         is RecipeOutcome.Guided -> "guided"
         is RecipeOutcome.Unverifiable -> "unverifiable"
         is RecipeOutcome.Failed -> "failed:${reason.name.lowercase()}"
+    }
+
+    private data class Guess(val recipeId: String, val params: Map<String, String>, val prompt: Prompt)
+
+    /**
+     * 도와줘를 눌렀을 때 먼저 물어볼 짐작 하나. 정상 상태와 지금 화면의 차이로 고르고, 근거가 없으면 null.
+     * 어르신이 읽을 말은 짧게, 어르신이 누를 답은 반말(어르신의 말)로 쓴다.
+     */
+    private fun guess(): Guess? {
+        val ctx = brainContext(null)
+        val base = baseline.current
+        val now = ctx.current
+        val other = "아니, 다른 거"
+        val video = base?.mediaTitle?.takeIf { now.mediaTitle != null && it != now.mediaTitle }
+        val app = base?.pkg?.takeIf { it.isNotBlank() && now.pkg.isNotBlank() && it != now.pkg }
+        return listOfNotNull(
+            Guess(RecipeIds.SKIP_AD, emptyMap(), Prompt("광고 넘길까요?", yes = "응, 넘겨 줘", no = other)).takeIf { ctx.screenHasAd },
+            video?.let { Guess(RecipeIds.RESTORE_VIDEO, mapOf("title" to it), Prompt("보던 거 다시 틀까요?", it, yes = "응, 틀어 줘", no = other)) },
+            app?.let { Guess(RecipeIds.OPEN_PREVIOUS_APP, mapOf("pkg" to it), Prompt("보던 앱 다시 열까요?", yes = "응, 열어 줘", no = other)) },
+            Guess(RecipeIds.SET_VOLUME, emptyMap(), Prompt("소리 다시 켤까요?", yes = "응, 켜 줘", no = other))
+                .takeIf { now.volume == 0 && (base?.volume ?: 0) > 0 },
+        ).firstOrNull { it.recipeId in recipes }
     }
 
     /** 말로 받은 복구에 빠진 값을 정상 상태로 채운다. 예: "아까 보던 거" → 정상 상태의 영상 제목. */
@@ -288,7 +324,7 @@ class MergoController(
         const val BUBBLE_TIMEOUT_MS = 15_000L
         const val LISTEN_TIMEOUT_MS = 5_000L
         const val DONE_CHECK_TIMEOUT_MS = 10_000L
-        val DONE_CHECK = Prompt("이 화면이 맞나요?", yes = "예, 맞아요", no = "아니요")
+        val DONE_CHECK = Prompt("이 화면이 맞나요?", yes = "응, 맞아", no = "아니")
         const val UNCHECKED_LOG = "해결됐는지 확인하지 못했어요"
         val HELP_CHOICES = listOf("아까 보던 거", "소리가 안 나", "이거 안 꺼져", "광고 안 꺼져")
     }

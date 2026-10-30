@@ -114,7 +114,7 @@ class StuckDetector(
                 val s = Suggestion(
                     RuleId.R2_HOME_EXIT, it.prevPkg, RecipeIds.OPEN_PREVIOUS_APP,
                     mapOf("pkg" to it.prevPkg), "아까 보시던 유튜브로 돌아갈까요?", now,
-                    headline = "홈 화면으로 나왔어요", yesLabel = "예, 돌아가 주세요",
+                    headline = "홈 화면으로 나왔어요", yesLabel = "응, 돌아가 줘",
                 )
                 if (emit(out, s) != Emit.DEFERRED) pendingR2 = null
             }
@@ -128,7 +128,7 @@ class StuckDetector(
                 val s = Suggestion(
                     RuleId.R4_AD_SKIP, "ad:${ytTitle ?: "-"}", RecipeIds.SKIP_AD, emptyMap(),
                     "광고 넘길까요?", now, headline = "광고가 나오고 있어요",
-                    yesLabel = "예, 넘겨 주세요", noLabel = "아니요, 볼게요",
+                    yesLabel = "응, 넘겨 줘", noLabel = "아니, 볼래",
                 )
                 if (emit(out, s) != Emit.DEFERRED) adSuggested = true
             }
