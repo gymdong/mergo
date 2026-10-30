@@ -125,7 +125,7 @@ class MergoService : AccessibilityService() {
             },
         ).associateBy { it.id }
 
-        overlay = OverlayUi(this, onHelp = { controller.launchHelp() }, onHelpLongPress = { dumpForDebug() })
+        overlay = OverlayUi(this, onHelp = { controller.launchHelp() })
         controller = MergoController(
             scope, clock, timeline, baseline, detector, cooldown, recipes,
             brain = MergoAi.brain(voice, settings), voice = voice, overlay = overlay, settings = settings,

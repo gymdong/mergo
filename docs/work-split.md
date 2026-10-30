@@ -115,7 +115,7 @@
 ## 사전 검증 방법 (A)
 
 1. `./gradlew installDebug` → 앱의 설정 화면에서 접근성, 알림 접근, 마이크 권한을 켠다.
-2. YouTube에서 확인하려는 화면(재생 중, 컨트롤 표시, 카운트다운, 광고)을 띄우고 **도와줘 버튼을 길게 누른다** → 노드 목록과 최근 기록이 저장된다.
+2. YouTube에서 확인하려는 화면(재생 중, 컨트롤 표시, 카운트다운, 광고)을 띄우고 `adb shell am broadcast -a app.mergo.DEBUG_DUMP -p app.mergo`를 보낸다(디버그 빌드) → 노드 목록과 최근 기록이 저장된다. 도와줘 버튼 길게 누르기는 2026-10-30부터 버튼 옮기기로 바뀌었다.
 3. `adb pull /sdcard/Android/data/app.mergo/files/ ./dumps/`로 가져와 `service/YouTubeSignals.kt`의 패턴을 보정한다. 카운트다운이 끝내 잡히지 않으면 `DetectorConfig.requireCountdown = false`로 바꾼다.
 4. 로그: `adb logcat -s Mergo:*`
 5. **뒤로 가기 확인(R3):** API 36 제스처 내비게이션에서는 뒤로 가기가 `KEYCODE_BACK`으로 안 올 수 있다. 로그에 BACK이 안 찍히면 에뮬레이터를 3버튼 내비게이션으로 바꿔 시연한다(설정 → 시스템 → 탐색 모드).

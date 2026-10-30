@@ -1,12 +1,14 @@
 package app.mergo.ui
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
@@ -27,13 +29,14 @@ import kotlin.coroutines.resume
  * - TYPE_ACCESSIBILITY_OVERLAY라 '다른 앱 위 표시' 권한이 필요 없다.
  * - 모든 창은 포커스를 받지 않아 아래 앱이 계속 '활성 창'으로 읽힌다.
  * - 복구 중·완료 카드는 터치를 통과시킨다. 레시피의 탭 제스처가 오버레이에 막히지 않게 하기 위해서다.
+ * - 도와줘 버튼은 누르고 있다가 끌면 옮길 수 있고, 옮긴 자리를 기억한다. 화면 내용을 가릴 때 쓴다.
  */
 class OverlayUi(
     private val service: AccessibilityService,
     private val onHelp: () -> Unit,
-    private val onHelpLongPress: () -> Unit,
 ) : OverlayPort {
     private val wm = service.getSystemService(WindowManager::class.java)
+    private val prefs = service.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private var helpButton: View? = null
     private var sheet: View? = null
     private var progressCard: View? = null
@@ -51,15 +54,77 @@ class OverlayUi(
             elevation = dp(6).toFloat()
             setPadding(dp(24), 0, dp(24), 0)
             setOnClickListener { onHelp() }
-            setOnLongClickListener { onHelpLongPress(); true }
             contentDescription = "머고 도와줘 버튼"
         }
         val lp = params(WindowManager.LayoutParams.WRAP_CONTENT, dp(64), Gravity.END or Gravity.BOTTOM).apply {
-            x = dp(16)
-            y = dp(96)
+            x = prefs.getInt(KEY_HELP_X, dp(16))
+            y = prefs.getInt(KEY_HELP_Y, dp(96))
         }
+        moveOnHold(b, lp)
         wm.addView(b, lp)
         helpButton = b
+    }
+
+    /**
+     * 누르면 도와줘, [HOLD_TO_MOVE_MS] 이상 누르고 있으면 손가락을 따라 옮긴다. 놓으면 그 자리를 기억한다.
+     * 손떨림으로 조금 움직인 것은 누르기로 보고, 누르기 전에 크게 미끄러지면 아무것도 하지 않는다.
+     */
+    private fun moveOnHold(b: View, lp: WindowManager.LayoutParams) {
+        var downX = 0f
+        var downY = 0f
+        var startX = 0
+        var startY = 0
+        var moving = false
+        var slid = false
+        val slop = TAP_SLOP_DP * service.resources.displayMetrics.density
+        val hold = Runnable {
+            moving = true
+            b.alpha = 0.75f
+            b.scaleX = 1.1f
+            b.scaleY = 1.1f
+        }
+        b.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = e.rawX
+                    downY = e.rawY
+                    startX = lp.x
+                    startY = lp.y
+                    moving = false
+                    slid = false
+                    v.isPressed = true
+                    v.postDelayed(hold, HOLD_TO_MOVE_MS)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = e.rawX - downX
+                    val dy = e.rawY - downY
+                    if (moving) {
+                        // 오른쪽 아래 기준이라 손가락이 오른쪽·아래로 가면 x·y가 줄어든다.
+                        val screen = service.resources.displayMetrics
+                        lp.x = (startX - dx.toInt()).coerceIn(0, (screen.widthPixels - v.width).coerceAtLeast(0))
+                        lp.y = (startY - dy.toInt()).coerceIn(0, (screen.heightPixels - v.height).coerceAtLeast(0))
+                        wm.updateViewLayout(v, lp)
+                    } else if (dx * dx + dy * dy > slop * slop) {
+                        slid = true
+                        v.isPressed = false
+                        v.removeCallbacks(hold)
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.removeCallbacks(hold)
+                    v.isPressed = false
+                    if (moving) {
+                        b.alpha = 1f
+                        b.scaleX = 1f
+                        b.scaleY = 1f
+                        prefs.edit().putInt(KEY_HELP_X, lp.x).putInt(KEY_HELP_Y, lp.y).apply()
+                    } else if (e.actionMasked == MotionEvent.ACTION_UP && !slid) {
+                        v.performClick()
+                    }
+                }
+            }
+            true
+        }
     }
 
     fun removeAll() {
@@ -179,8 +244,17 @@ class OverlayUi(
         for (c in choices) {
             box.addView(secondaryButton(c, Color.WHITE, Color.parseColor("#5E8A79")) { removeSheet(); onPick(c) }, buttonLp(false))
         }
-        box.addView(secondaryButton("✕  닫기", Color.parseColor("#CFE0D6"), Color.TRANSPARENT) { removeSheet(); onPick(null) }, buttonLp(false))
-        addSheet(box)
+        // 잘못 눌러 열었을 때 바로 빠져나갈 수 있게, 닫기도 테두리가 보이는 큰 버튼으로 둔다.
+        box.addView(secondaryButton("괜찮아요, 닫을게요", LIME, LIME) { removeSheet(); onPick(null) }, buttonLp(false))
+        // 패널 바깥을 누르면(하던 일을 계속하려는 것) 닫는다.
+        box.setOnTouchListener { _, e ->
+            if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) {
+                removeSheet()
+                onPick(null)
+            }
+            false
+        }
+        addSheet(box, watchOutside = true)
     }
 
     private fun sheetContainer(bg: Int) = LinearLayout(service).apply {
@@ -193,8 +267,10 @@ class OverlayUi(
         elevation = dp(12).toFloat()
     }
 
-    private fun addSheet(v: View) {
-        wm.addView(v, params(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+    private fun addSheet(v: View, watchOutside: Boolean = false) {
+        val lp = params(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM)
+        if (watchOutside) lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+        wm.addView(v, lp)
         sheet = v
     }
 
@@ -262,6 +338,14 @@ class OverlayUi(
     private fun dp(v: Int): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), service.resources.displayMetrics).toInt()
 
     private companion object {
+        const val PREFS = "mergo_overlay"
+        const val KEY_HELP_X = "help_x"
+        const val KEY_HELP_Y = "help_y"
+        /** 이만큼 누르고 있으면 도와줘 대신 옮기기. 어르신이 천천히 누르는 것을 감안해 길게 둔다. */
+        const val HOLD_TO_MOVE_MS = 800L
+        /** 손떨림으로 이 안에서 움직인 것은 그대로 누르기로 본다. */
+        const val TAP_SLOP_DP = 24f
+
         // mergo_UI.pdf 시안 색
         val GREEN = Color.parseColor("#24664F")
         val DEEP_GREEN = Color.parseColor("#1B3D33")
