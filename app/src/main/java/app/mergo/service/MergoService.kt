@@ -41,6 +41,7 @@ import app.mergo.model.ScreenAgent
 import app.mergo.model.ScreenEvent
 import app.mergo.recipe.OpenInternetPanel
 import app.mergo.recipe.OpenPreviousApp
+import app.mergo.recipe.AutoBrightness
 import app.mergo.recipe.BrightenScreen
 import app.mergo.recipe.IncreaseTextSize
 import app.mergo.recipe.DisplayRescueMonitor
@@ -49,6 +50,7 @@ import app.mergo.recipe.SetVolume
 import app.mergo.recipe.SkipAd
 import app.mergo.settings.MergoSettings
 import app.mergo.ui.OverlayUi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -70,6 +72,7 @@ class MergoService : AccessibilityService() {
     private lateinit var display: AndroidDisplaySettings
     private lateinit var displayPreferences: MergoSettings
     private val displayMonitor = DisplayRescueMonitor()
+    private var lowBrightnessCheck: Job? = null
     private lateinit var media: MediaTitleSource
     private lateinit var overlay: OverlayUi
     private lateinit var voice: AndroidVoiceIO
@@ -162,6 +165,7 @@ class MergoService : AccessibilityService() {
         watchDeviceState()
         displayMonitor.onSnapshot(display.read(), settings.displayAutoRescue, settings.preferredBrightness, settings.preferredFontScale)
         watchDisplayState()
+        checkLowBrightness()
         if (BuildConfig.DEBUG) registerDebugHear()
         controller.onDeviceState(device.volume(), device.isOnline(), userAction = false)
 
@@ -313,15 +317,31 @@ class MergoService : AccessibilityService() {
         netCallback = cb
     }
 
-    /** 밝기·글자 설정의 급격한 하락만 살핀다. 가족이 저장한 값과 자동 복구 선택이 없으면 아무것도 하지 않는다. */
+    /** 값이 멈춘 뒤에도 너무 어두우면 먼저 밝게 하고 어르신께 묻는다. 어르신이 싫다고 하면 이 기기에서 끈다. */
+    private fun checkLowBrightness() {
+        lowBrightnessCheck?.cancel()
+        if (!tooDark()) return
+        lowBrightnessCheck = scope.launch {
+            delay(AutoBrightness.SETTLE_MS)
+            controller.launchAutomaticBrightness(AutoBrightness.COMFORT, ::tooDark) {
+                displayPreferences.autoBrightness = false
+            }
+        }
+    }
+
+    private fun tooDark() =
+        displayPreferences.autoBrightness && display.canWrite() && AutoBrightness.isTooDark(display.read())
+
+    /** 밝기는 기본으로 지키고, 저장값으로의 복구는 가족이 켠 경우에만 한다. 저장값 복구는 급격한 하락만 살핀다. */
     private fun watchDisplayState() {
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
+                checkLowBrightness()
                 val prefs = displayPreferences
                 val targets = displayMonitor.onSnapshot(
                     display.read(), prefs.displayAutoRescue && display.canWrite(),
                     prefs.preferredBrightness, prefs.preferredFontScale,
-                )
+                ).filterNot { it == RecipeIds.BRIGHTEN_SCREEN && !prefs.autoBrightness }
                 if (targets.isEmpty()) return
                 scope.launch {
                     for (recipeId in targets) controller.launchAutomaticDisplayRescue(recipeId) {

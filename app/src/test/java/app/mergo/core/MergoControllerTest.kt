@@ -138,6 +138,54 @@ class MergoControllerTest {
         assertTrue(env.familyLog.all().single().resolved)
     }
 
+    private val autoBrightnessTitle = MergoController.AUTO_BRIGHTNESS_CHECK.title
+
+    @Test
+    fun `너무 어두우면 묻기 전에 밝게 하고 어떤지 묻는다`() = runTest {
+        var declined = false
+        val env = Env(this, recipeId = RecipeIds.BRIGHTEN_SCREEN, overlay = FakeOverlay(answer = YesNo.YES))
+        env.controller.launchAutomaticBrightness(78, { true }) { declined = true }.join()
+        assertEquals(listOf(mapOf("level" to "78")), env.recipe.calls)
+        assertEquals(listOf(autoBrightnessTitle), env.overlay.asked)
+        assertTrue(env.voice.spoken.any { "어때요?" in it })
+        assertFalse(declined)
+        assertTrue(env.familyLog.all().single().resolved)
+    }
+
+    @Test
+    fun `자동으로 밝게 한 뒤 싫다고 하면 자동 감지를 끈다`() = runTest {
+        var declined = false
+        val env = Env(this, recipeId = RecipeIds.BRIGHTEN_SCREEN, overlay = FakeOverlay(answer = YesNo.NO))
+        env.controller.launchAutomaticBrightness(78, { true }) { declined = true }.join()
+        assertTrue(declined)
+        assertEquals(listOf(autoBrightnessTitle), env.overlay.asked)
+    }
+
+    @Test
+    fun `자동으로 밝게 한 뒤 답이 없으면 자동 감지를 끄지 않는다`() = runTest {
+        var declined = false
+        val env = Env(this, recipeId = RecipeIds.BRIGHTEN_SCREEN)
+        env.controller.launchAutomaticBrightness(78, { true }) { declined = true }.join()
+        assertFalse(declined)
+    }
+
+    @Test
+    fun `기다리는 사이 밝아졌으면 자동으로 바꾸지 않는다`() = runTest {
+        val env = Env(this, recipeId = RecipeIds.BRIGHTEN_SCREEN)
+        env.controller.launchAutomaticBrightness(78, { false }) {}.join()
+        assertTrue(env.recipe.calls.isEmpty())
+    }
+
+    @Test
+    fun `밝기를 요청해서 올린 뒤에는 밝기가 괜찮은지 묻는다`() = runTest {
+        val env = Env(
+            this, recipeId = RecipeIds.BRIGHTEN_SCREEN, overlay = FakeOverlay(answer = YesNo.YES),
+            decision = BrainDecision("시각 설정", RecipeIds.BRIGHTEN_SCREEN, emptyMap(), "화면을 밝게 할게요.", false),
+        )
+        env.controller.onHelp("화면이 너무 어두워")
+        assertEquals(listOf(MergoController.BRIGHTNESS_CHECK.title), env.overlay.asked)
+    }
+
     @Test
     fun `YouTube 광고를 본 뒤 다른 앱으로 가면 광고 중으로 보지 않는다`() = runTest {
         val env = Env(this)

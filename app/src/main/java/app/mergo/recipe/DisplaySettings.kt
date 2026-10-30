@@ -18,6 +18,20 @@ interface DisplaySettingsPort {
     fun setFontScale(value: Float): Boolean
 }
 
+/**
+ * 기본으로 켜져 있는 밝기 지킴이의 기준. 값은 시스템 밝기(1~255)다.
+ * 자동 밝기 때문에 어두워진 경우도 잡는다. 밝게 할 때 자동 밝기를 끄므로 다시 어두워지지 않는다.
+ * 자동 밝기에서 이 값이 실제 화면을 따라가는지는 기기마다 다를 수 있다.
+ */
+object AutoBrightness {
+    const val TOO_DARK = 50
+    const val COMFORT = 78
+    /** 밝기 막대를 움직이는 중에 끼어들지 않도록 값이 멈출 때까지 기다린다. */
+    const val SETTLE_MS = 2_000L
+
+    fun isTooDark(now: DisplaySnapshot): Boolean = now.brightness != null && now.brightness < TOO_DARK
+}
+
 class BrightenScreen(
     private val display: DisplaySettingsPort,
     private val preferred: () -> Int?,
@@ -28,7 +42,10 @@ class BrightenScreen(
         if (!display.canWrite()) return RecipeOutcome.Guided("화면 설정을 바꾸려면 가족이 머고의 설정 변경 권한을 켜야 해요.")
         val before = display.read()
         val current = before.brightness ?: return RecipeOutcome.Unverifiable("현재 밝기를 읽지 못함")
-        val target = if (params["restore"] == "true") {
+        val level = params["level"]?.toIntOrNull()?.takeIf { it in 1..255 }
+        val target = if (level != null) {
+            level
+        } else if (params["restore"] == "true") {
             preferred()?.takeIf { it in 1..255 && it > current } ?: return RecipeOutcome.Failed(FailReason.PRECONDITION)
         } else {
             max(current + STEP, preferred()?.takeIf { it in 1..255 } ?: MIN_REQUEST).coerceAtMost(MAX_REQUEST)

@@ -31,6 +31,12 @@ class SettingsActivity : Activity() {
             isChecked = settings.autoExecute
             setOnCheckedChangeListener { _, checked -> settings.autoExecute = checked }
         }
+        val autoBrightness = Switch(this).apply {
+            text = "너무 어두우면 자동으로 밝게"
+            textSize = 18f
+            isChecked = settings.autoBrightness
+            setOnCheckedChangeListener { _, checked -> settings.autoBrightness = checked }
+        }
         val displayAutoRescue = Switch(this).apply {
             text = "화면 밝기·글자 크기 자동 복구"
             textSize = 18f
@@ -66,6 +72,12 @@ class SettingsActivity : Activity() {
                 card().apply {
                     addView(autoExecute)
                     addView(label("켜면 묻지 않고 바로 고쳐요. 설치와 결제 같은 버튼은 켜도 누르지 않아요."))
+                },
+            )
+            addView(
+                card().apply {
+                    addView(autoBrightness)
+                    addView(label("화면이 너무 어두워지면 머고가 먼저 밝게 하고 어떤지 여쭤봐요. 자동 밝기가 켜져 있었다면 함께 꺼요. 어르신이 싫다고 하시면 이 기능이 꺼져요."))
                 },
             )
             addView(
