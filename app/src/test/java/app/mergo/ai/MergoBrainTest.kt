@@ -21,6 +21,43 @@ class MergoBrainTest {
     )
 
     @Test
+    fun `어둡거나 글씨가 작다는 도와줘 발화는 LLM 없이 직접 설정 변경을 고른다`() = runTest {
+        val llm = ScriptedLlm()
+        val brain = MergoBrain(llm, RecordingVoice())
+        for (said in listOf("화면이 너무 어두워", "밝기가 너무 낮아졌어", "더 밝게 해줘", "화면 깜깜해",
+            "아무것도 안 건드렸는데 화면이 어두워졌어")) {
+            assertTrue(said, RecipeIds.BRIGHTEN_SCREEN in KeywordRules.match(ctx(said)).candidates)
+            val decision = brain.decide(ctx(said))
+            assertEquals(said, RecipeIds.BRIGHTEN_SCREEN, decision.recipe)
+            assertFalse("도와줘를 누른 뒤 명확히 요청했으므로 다시 묻지 않는다", decision.confirm)
+        }
+        for (said in listOf("글자가 너무 작아", "글씨 좀 키워줘", "폰트 크게 해줘")) {
+            assertTrue(said, RecipeIds.INCREASE_TEXT_SIZE in KeywordRules.match(ctx(said)).candidates)
+            val decision = brain.decide(ctx(said))
+            assertEquals(said, RecipeIds.INCREASE_TEXT_SIZE, decision.recipe)
+            assertFalse(decision.confirm)
+        }
+        assertEquals(0, llm.calls)
+    }
+
+    @Test
+    fun `화면을 더 어둡게 또는 글씨를 작게 하라는 말은 반대로 실행하지 않는다`() {
+        for (said in listOf("밝기를 낮춰줘", "화면이 너무 밝아", "글씨 작게 해줘", "글자가 너무 커",
+            "화면 밝게 하지 마", "글씨 크게 하지 마", "글자가 작지 않아", "화면이 어두운 건 아닌데")) {
+            val candidates = KeywordRules.match(ctx(said)).candidates
+            assertFalse(said, RecipeIds.BRIGHTEN_SCREEN in candidates || RecipeIds.INCREASE_TEXT_SIZE in candidates)
+        }
+        assertEquals(listOf(RecipeIds.INCREASE_TEXT_SIZE), KeywordRules.match(ctx("화면은 어둡지 않은데 글씨만 작아")).candidates)
+    }
+
+    @Test
+    fun `LLM이 명확한 시각 요청 없이 밝기를 바꾸자고 해도 차단한다`() = runTest {
+        val llm = ScriptedLlm(replies = listOf("""{"diagnosis":"", "recipe":"brighten_screen", "params":{}, "say":"화면 밝힐게요"}"""))
+        val decision = MergoBrain(llm, RecordingVoice()).decide(ctx("이거 이상해"))
+        assertEquals(RecipeIds.ASK, decision.recipe)
+    }
+
+    @Test
     fun `후보가 하나면 LLM을 부르지 않는다`() = runTest {
         val llm = ScriptedLlm(replies = listOf(goodReply))
         val decision = MergoBrain(llm, RecordingVoice()).decide(ctx("소리가 안 나", volume = 0))

@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 가족이 미리 허용하면 화면 밝기·글자 크기를 직접 복구한다. -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
 
     <!-- 직전 앱 다시 열기(S3)를 위해 런처 앱 목록을 조회한다 -->
     <queries>
