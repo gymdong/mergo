@@ -128,7 +128,7 @@ class StuckDetector(
                 val s = Suggestion(
                     RuleId.R4_AD_SKIP, "ad:${ytTitle ?: "-"}", RecipeIds.SKIP_AD, emptyMap(),
                     "광고 넘길까요?", now, headline = "광고가 나오고 있어요",
-                    yesLabel = "응, 넘겨 줘", noLabel = "아니, 볼래",
+                    yesLabel = "응, 넘겨 줘", noLabel = "아니, 볼래", askFirst = !config.autoSkipAds,
                 )
                 if (emit(out, s) != Emit.DEFERRED) adSuggested = true
             }
@@ -182,7 +182,7 @@ class StuckDetector(
         val autoplay = if (config.requireCountdown) countdownSeen && noTouch else noTouch
         if (autoplay) {
             // R1: 이전 영상이 정상 상태(30초 이상 본 영상)여야 한다.
-            if (baseline != null && baseline == prev) pendingR1 = PendingR1(prev, ts)
+            if (config.suggestAutoplay && baseline != null && baseline == prev) pendingR1 = PendingR1(prev, ts)
         } else {
             // R3: 사용자가 바꿨다. 이 시점에는 개입하지 않고 30초 동안 혼란 신호를 지켜본다.
             val target = baseline ?: return

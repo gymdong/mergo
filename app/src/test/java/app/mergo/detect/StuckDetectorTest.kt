@@ -46,7 +46,7 @@ class StuckDetectorTest {
     // AC-D2
     @Test
     fun `대체 모드에서는 카운트다운 없이 터치 부재만으로 R1 제안 1회`() {
-        val sim = Sim(DetectorConfig(launcherPkgs = setOf(LAUNCHER), requireCountdown = false))
+        val sim = Sim(DetectorConfig(launcherPkgs = setOf(LAUNCHER), requireCountdown = false, suggestAutoplay = true))
         sim.userPlays(0, "트로트 메들리", watchMs = 60_000)
         autoplay(sim, 70_000, "오늘의 뉴스", countdown = false)
         sim.playing(70_000, 120_000, "오늘의 뉴스")
@@ -193,6 +193,17 @@ class StuckDetectorTest {
         adVisible(sim, 50_000, 70_000)
         assertEquals(listOf(RuleId.R4_AD_SKIP), sim.rules())
         assertEquals(RecipeIds.SKIP_AD, sim.suggestions.single().recipeId)
+        assertEquals("기본은 묻지 않고 넘긴다", false, sim.suggestions.single().askFirst)
+    }
+
+    @Test
+    fun `기본 설정에서는 자동재생으로 넘어가도 되돌리기를 제안하지 않는다`() {
+        val sim = Sim(DetectorConfig(launcherPkgs = setOf(LAUNCHER)))
+        sim.userPlays(0, "트로트 메들리", watchMs = 40_000)
+        sim.event(50_000, EventKind.CONTENT_CHANGED, title = "트로트 메들리", markers = setOf(Marker.AUTOPLAY_COUNTDOWN))
+        sim.event(55_000, EventKind.CONTENT_CHANGED, title = "다른 영상")
+        sim.advanceTo(80_000)
+        assertTrue(sim.rules().isEmpty())
     }
 
     @Test
@@ -222,7 +233,7 @@ class StuckDetectorTest {
     // AC-D6
     @Test
     fun `거절한 규칙은 5분 동안 다른 대상에도 제안하지 않고 그 뒤에는 다시 제안한다`() {
-        val sim = Sim(DetectorConfig(launcherPkgs = setOf(LAUNCHER), requireCountdown = false))
+        val sim = Sim(DetectorConfig(launcherPkgs = setOf(LAUNCHER), requireCountdown = false, suggestAutoplay = true))
         sim.userPlays(0, "영상 가", watchMs = 60_000)
         autoplay(sim, 70_000, "영상 나", countdown = false)
         sim.advanceTo(81_000)

@@ -98,10 +98,10 @@ class MergoController(
         try {
             log("제안 ${s.rule} target=${s.target} recipe=${s.recipeId} params=${s.params}")
             val prompt = Prompt(s.headline, s.say, eyebrow = "머고가 알아챘어요", yes = s.yesLabel, no = s.noLabel)
-            val answer = if (settings.autoExecute) YesNo.YES else confirm(prompt)
+            val answer = if (settings.autoExecute || !s.askFirst) YesNo.YES else confirm(prompt)
             log("응답 ${s.rule}: $answer")
             if (answer == YesNo.YES) {
-                execute(s.recipeId, s.params, s.say)
+                execute(s.recipeId, s.params, s.say, quiet = !s.askFirst)
             } else {
                 // 거절이나 무응답: 같은 대상에는 다시 제안하지 않고, 지금 상태를 정상 상태로 인정한다.
                 cooldown.reject(s.rule, s.target, clock.now())
@@ -192,14 +192,15 @@ class MergoController(
         )
     }
 
-    private suspend fun execute(recipeId: String, params: Map<String, String>, situation: String) {
+    /** [quiet]면 묻지 않고 한 일이라 말하지 않고, 완료 확인·가족 알림도 묻지 않는다. 결과는 글자 카드와 기록으로만 남긴다. */
+    private suspend fun execute(recipeId: String, params: Map<String, String>, situation: String, quiet: Boolean = false) {
         val recipe = recipes[recipeId]
         val started = clock.now()
         val text = Texts.of(recipeId, params)
         automating = true
         val outcome = try {
             overlay.progress(text.progress)
-            voice.speak(text.progress)
+            if (!quiet) voice.speak(text.progress)
             if (recipe == null) {
                 RecipeOutcome.Failed(FailReason.NO_RECIPE)
             } else {
@@ -219,6 +220,7 @@ class MergoController(
         when (outcome) {
             is RecipeOutcome.Verified -> {
                 overlay.done(text.done, "이제 편하게 이어서 보세요.")
+                if (quiet) return record(resolved = true, summary = text.log)
                 voice.speak(text.done)
                 // 시안 05: 원래 상태가 맞는지 한 번 더 묻는다. 머고가 이미 확인했으므로 무응답은 맞는 것으로 본다(어르신 터치 1회 목표 유지).
                 val right = if (settings.autoExecute) YesNo.YES else confirm(DONE_CHECK, DONE_CHECK_TIMEOUT_MS)
@@ -229,10 +231,11 @@ class MergoController(
             // 해결도 실패도 아니므로 가족 알림을 묻지 않는다. 안내 문장은 여기서 한 번만 말한다.
             is RecipeOutcome.Guided -> {
                 overlay.notice(outcome.said)
-                voice.speak(outcome.said)
+                if (!quiet) voice.speak(outcome.said)
                 return record(resolved = false, summary = outcome.said)
             }
             is RecipeOutcome.Unverifiable -> {
+                if (quiet) return record(resolved = false, summary = UNCHECKED_LOG)
                 // 머고가 결과를 확인하지 못했으니 '다 됐어요'라고 하지 않는다. 사용자가 "예"라고 해야만 해결로 기록하고, 무응답은 미확인으로 둔다.
                 // 확인 없이 실행 모드에서는 물을 수 없으니 미확인으로만 남긴다.
                 val right = if (settings.autoExecute) {
@@ -244,7 +247,7 @@ class MergoController(
                 if (right == YesNo.YES) return record(resolved = true, summary = text.log)
                 if (right == YesNo.NONE) return record(resolved = false, summary = UNCHECKED_LOG)
             }
-            is RecipeOutcome.Failed -> Unit
+            is RecipeOutcome.Failed -> if (quiet) return record(resolved = false, summary = text.failLog)
         }
         val tellFamily = if (settings.autoExecute) {
             YesNo.YES

@@ -17,6 +17,8 @@ data class Suggestion(
     /** 어르신이 누르는 답은 어르신의 말이라 반말로 쓴다("도와줘" 버튼과 같은 말투). */
     val yesLabel: String = "응, 도와줘",
     val noLabel: String = "아니, 괜찮아",
+    /** false면 묻지 않고 조용히 실행한다(광고 건너뛰기). 끝나면 글자 카드로만 알린다. */
+    val askFirst: Boolean = true,
 ) {
     companion object {
         fun restoreVideo(rule: RuleId, title: String, mode: String, now: Long) = Suggestion(

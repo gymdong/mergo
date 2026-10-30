@@ -82,7 +82,7 @@ class MergoControllerTest {
         val clock = Clock { scope.testScheduler.currentTime }
         val cooldown = Cooldown()
         val baseline = BaselineStore(clock, emptySet())
-        val detector = StuckDetector(clock, DetectorConfig(), cooldown) { baseline.current?.mediaTitle }
+        val detector = StuckDetector(clock, DetectorConfig(suggestAutoplay = true), cooldown) { baseline.current?.mediaTitle }
         val recipe = FakeRecipe(RecipeIds.RESTORE_VIDEO, outcome)
         val familyLog = FamilyLog(null)
         val brainCalls = mutableListOf<BrainContext>()
@@ -250,6 +250,25 @@ class MergoControllerTest {
         assertTrue(env.cooldown.isBlocked(RuleId.R1_AUTOPLAY, "트로트 메들리", testScheduler.currentTime))
         assertEquals(MergoController.BUBBLE_TIMEOUT_MS, testScheduler.currentTime)
         assertTrue("무응답이면 말하지 않는다", "알겠어요" !in env.voice.spoken)
+    }
+
+    @Test
+    fun `묻지 않는 제안(광고 넘기기)은 말없이 실행하고 완료 카드만 띄운다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = YesNo.NO))
+        env.controller.onSuggestion(env.suggestion.copy(askFirst = false))
+        assertTrue("묻지 않는다", env.overlay.asked.isEmpty())
+        assertEquals(1, env.recipe.calls.size)
+        assertTrue("말하지 않는다", env.voice.spoken.isEmpty())
+        assertEquals(listOf("원래 영상으로 돌아왔어요"), env.overlay.done)
+        assertTrue(env.familyLog.all().single().resolved)
+    }
+
+    @Test
+    fun `묻지 않고 한 일이 실패해도 가족 알림을 묻지 않는다`() = runTest {
+        val env = Env(this, outcome = RecipeOutcome.Failed(FailReason.NOT_REACHED), overlay = FakeOverlay(answer = YesNo.YES))
+        env.controller.onSuggestion(env.suggestion.copy(askFirst = false))
+        assertTrue(env.overlay.asked.isEmpty())
+        assertEquals(false, env.familyLog.all().single().notified)
     }
 
     @Test
