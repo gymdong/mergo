@@ -6,6 +6,8 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
+import android.graphics.text.LineBreakConfig
+import android.os.Build
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -92,6 +94,7 @@ fun Context.label(
     textSize = sp
     setTextColor(color)
     if (bold) typeface = Typeface.DEFAULT_BOLD
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) lineBreakWordStyle = LineBreakConfig.LINE_BREAK_WORD_STYLE_PHRASE
 }
 
 fun Context.column(padding: Int = 0): LinearLayout = LinearLayout(this).apply {

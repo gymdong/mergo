@@ -5,7 +5,9 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
+import android.graphics.text.LineBreakConfig
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -47,20 +49,20 @@ class OverlayUi(
     fun showHelpButton() {
         if (helpButton != null) return
         val b = Button(service).apply {
-            text = "✦  도와줘"
+            text = "도와줘"
             isAllCaps = false
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
             background = round(GREEN, dp(32).toFloat())
             elevation = dp(6).toFloat()
-            setPadding(dp(24), 0, dp(24), 0)
+            setPadding(dp(22), 0, dp(22), 0)
             setOnClickListener { onHelp() }
             contentDescription = "머고 도와줘 버튼"
         }
         val lp = params(WindowManager.LayoutParams.WRAP_CONTENT, dp(64), Gravity.END or Gravity.BOTTOM).apply {
             x = prefs.getInt(KEY_HELP_X, dp(16))
-            y = prefs.getInt(KEY_HELP_Y, dp(96))
+            y = prefs.getInt(KEY_HELP_Y, dp(64))
         }
         moveOnHold(b, lp)
         wm.addView(b, lp)
@@ -319,6 +321,8 @@ class OverlayUi(
 
     private fun label(text: String, sp: Float, color: Int, bold: Boolean = false, center: Boolean = false) = TextView(service).apply {
         this.text = text
+        // 어르신 폰은 글자를 키워 쓰므로 줄이 자주 바뀐다. 단어 중간에서 끊기지 않게 한다.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) lineBreakWordStyle = LineBreakConfig.LINE_BREAK_WORD_STYLE_PHRASE
         setTextSize(TypedValue.COMPLEX_UNIT_SP, sp)
         setTextColor(color)
         if (bold) typeface = Typeface.DEFAULT_BOLD
