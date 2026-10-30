@@ -52,13 +52,17 @@ class MergoControllerTest {
             delay(answerAfterMs)
             return a
         }
+        val chosenPrompts = mutableListOf<String>()
         override suspend fun choose(prompt: String, choices: List<String>, timeoutMs: Long): String? {
+            chosenPrompts += prompt
             val c = choice ?: run { delay(timeoutMs); return null }
             delay(answerAfterMs)
             return c
         }
         override fun progress(text: String?) { progress += text }
         override fun done(title: String, body: String) { done += title }
+        val notices = mutableListOf<String>()
+        override fun notice(text: String) { notices += text }
         override fun dismiss() {}
     }
 
@@ -149,6 +153,7 @@ class MergoControllerTest {
         assertEquals("guided", log.outcome)
         assertEquals("광고가 끝나면 이어서 나와요", log.summary)
         assertEquals("안내 문장은 컨트롤러가 한 번 말한다", 1, env.voice.spoken.count { it == "광고가 끝나면 이어서 나와요" })
+        assertEquals("글자로도 보여 준다", listOf("광고가 끝나면 이어서 나와요"), env.overlay.notices)
     }
 
     @Test
@@ -356,6 +361,37 @@ class MergoControllerTest {
         assertFalse(SensitiveScreen.matches(LiveScreen("com.android.settings", listOf("Wi‑Fi", "비밀번호 저장됨"))))
         assertFalse(SensitiveScreen.matches(LiveScreen("com.kakao.talk", listOf("[Web발신] 인증번호 [123456]"))))
         assertTrue(SensitiveScreen.matches(LiveScreen("com.android.chrome", listOf("결제하기"))))
+    }
+
+    @Test
+    fun `되물으면 그 질문으로 선택지를 한 번 더 보여 주고 고른 것으로 다시 판단한다`() = runTest {
+        val env = Env(this, overlay = FakeOverlay(answer = YesNo.YES, choice = "이거 이상해"))
+        val asks = ArrayDeque(listOf(
+            BrainDecision("모름", RecipeIds.ASK, emptyMap(), "화면이 어떻게 이상하신가요?", false),
+            BrainDecision("영상", RecipeIds.RESTORE_VIDEO, emptyMap(), "돌아갈까요?", true),
+        ))
+        val controller = MergoController(
+            this, env.clock, TimelineBuffer(env.clock), env.baseline, env.detector, env.cooldown,
+            mapOf(env.recipe.id to env.recipe),
+            object : Brain { override suspend fun decide(ctx: BrainContext) = asks.removeFirst() },
+            env.voice, env.overlay, DefaultSettings(), env.familyLog,
+            liveVolume = { 8 }, liveOnline = { true },
+        )
+        controller.onHelp()
+        assertEquals(listOf("무엇을 도와드릴까요?", "화면이 어떻게 이상하신가요?"), env.overlay.chosenPrompts)
+        assertEquals(1, env.recipe.calls.size)
+    }
+
+    @Test
+    fun `판단하는 동안 살펴보고 있다고 보여 주고, 되묻는 말은 글자로도 보여 준다`() = runTest {
+        val env = Env(
+            this, overlay = FakeOverlay(choice = "이거 이상해"),
+            decision = BrainDecision("판단 불가", RecipeIds.ASK, emptyMap(), "제가 잘 못 알아들었어요.", false),
+        )
+        env.controller.onHelp()
+        assertEquals("두 번 판단할 때마다 보여 준다", listOf<String?>("살펴보고 있어요", null, "살펴보고 있어요", null), env.overlay.progress)
+        assertEquals("두 번째도 모르면 글자로 남기고 끝낸다", listOf("제가 잘 못 알아들었어요."), env.overlay.notices)
+        assertEquals(2, env.overlay.chosenPrompts.size)
     }
 
     @Test

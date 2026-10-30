@@ -42,6 +42,7 @@ class OverlayUi(
     private var sheet: View? = null
     private var progressCard: View? = null
     private var doneCard: View? = null
+    private var noticeCard: View? = null
 
     fun showHelpButton() {
         if (helpButton != null) return
@@ -132,6 +133,7 @@ class OverlayUi(
         removeSheet()
         progressCard?.let(::remove)
         doneCard?.let(::remove)
+        noticeCard?.let(::remove)
         helpButton?.let(::remove)
         progressCard = null
         doneCard = null
@@ -207,6 +209,19 @@ class OverlayUi(
             })
             doneCard = row
             row.postDelayed({ if (doneCard === row) { remove(row); doneCard = null } }, 4_000)
+        }
+    }
+
+    override fun notice(text: String) {
+        service.mainExecutor.execute {
+            noticeCard?.let(::remove)
+            val card = card(BG_LIGHT).apply { addView(label(text, 22f, INK)) }
+            wm.addView(card, params(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT, Gravity.TOP, touchable = false).apply {
+                horizontalMargin = 0.04f
+                y = dp(40)
+            })
+            noticeCard = card
+            card.postDelayed({ if (noticeCard === card) { remove(card); noticeCard = null } }, NOTICE_MS)
         }
     }
 
@@ -342,6 +357,7 @@ class OverlayUi(
         const val HOLD_TO_MOVE_MS = 800L
         /** 손떨림으로 이 안에서 움직인 것은 그대로 누르기로 본다. */
         const val TAP_SLOP_DP = 24f
+        const val NOTICE_MS = 8_000L
 
         // mergo_UI.pdf 시안 색
         val GREEN = Color.parseColor("#24664F")

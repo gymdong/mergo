@@ -10,6 +10,7 @@ import app.mergo.memory.TimelineBuffer
 import app.mergo.model.Baseline
 import app.mergo.model.Brain
 import app.mergo.model.BrainContext
+import app.mergo.model.BrainDecision
 import app.mergo.model.Clock
 import app.mergo.model.FailReason
 import app.mergo.model.Marker
@@ -125,7 +126,7 @@ class MergoController(
         try {
             val screen = liveScreen()
             if (SensitiveScreen.matches(screen)) return guideOutOfSensitiveScreen(screen, utterance)
-            val said = utterance ?: run {
+            var said = utterance ?: run {
                 // 머고가 짐작 가는 게 있으면 그것 하나만 먼저 묻는다. 아니라고 하면 선택지를 보여 준다.
                 guess()?.let { g ->
                     log("도와줘 추측: ${g.recipeId} ${g.params}")
@@ -143,11 +144,17 @@ class MergoController(
                 overlay.dismiss()
                 return
             }
-            log("도와줘 발화: $said")
-            val started = clock.now()
-            val decision = brain.decide(brainContext(said))
-            log("Brain ${clock.now() - started}ms: $decision")
+            var decision = decide(said)
+            // 되물었는데 대답을 받지 않으면 거기서 끝나 버린다. 그 질문으로 선택지를 한 번 더 보여 준다.
+            if (decision.recipe == RecipeIds.ASK && utterance == null) {
+                said = askWhatHappened(decision.say) ?: run {
+                    overlay.dismiss()
+                    return
+                }
+                decision = decide(said)
+            }
             if (decision.recipe == RecipeIds.ASK || decision.recipe !in recipes) {
+                overlay.notice(decision.say)
                 voice.speak(decision.say)
                 return
             }
@@ -221,6 +228,7 @@ class MergoController(
             }
             // 해결도 실패도 아니므로 가족 알림을 묻지 않는다. 안내 문장은 여기서 한 번만 말한다.
             is RecipeOutcome.Guided -> {
+                overlay.notice(outcome.said)
                 voice.speak(outcome.said)
                 return record(resolved = false, summary = outcome.said)
             }
@@ -320,10 +328,24 @@ class MergoController(
         answer
     }
 
-    private suspend fun askWhatHappened(): String? = coroutineScope {
-        val tapped = async { overlay.choose("무엇을 도와드릴까요?", HELP_CHOICES, BUBBLE_TIMEOUT_MS) }
+    /** LLM을 부르면 몇 초 걸린다. 그동안 화면이 멈춘 것처럼 보이지 않게 한다. */
+    private suspend fun decide(said: String): BrainDecision {
+        log("도와줘 발화: $said")
+        val started = clock.now()
+        overlay.progress(THINKING)
+        val decision = try {
+            brain.decide(brainContext(said))
+        } finally {
+            overlay.progress(null)
+        }
+        log("Brain ${clock.now() - started}ms: $decision")
+        return decision
+    }
+
+    private suspend fun askWhatHappened(question: String = "무엇을 도와드릴까요?"): String? = coroutineScope {
+        val tapped = async { overlay.choose(question, HELP_CHOICES, BUBBLE_TIMEOUT_MS) }
         val spoken = async {
-            voice.speak("무엇을 도와드릴까요?")
+            voice.speak(question)
             voice.listen(LISTEN_TIMEOUT_MS)
         }
         val first = select<Pair<Boolean, String?>> {
@@ -346,6 +368,7 @@ class MergoController(
         const val DONE_CHECK_TIMEOUT_MS = 10_000L
         val DONE_CHECK = Prompt("이 화면이 맞나요?", yes = "응, 맞아", no = "아니")
         const val UNCHECKED_LOG = "해결됐는지 확인하지 못했어요"
+        const val THINKING = "살펴보고 있어요"
         const val SENSITIVE_RECIPE = "sensitive_screen"
         const val SENSITIVE_TITLE = "여기서는 누르지 않을게요"
         const val SENSITIVE_BODY = "아무것도 누르지 말고 뒤로 가기를 누르세요. 가족에게 알릴까요?"

@@ -21,5 +21,7 @@ interface OverlayPort {
     fun progress(text: String?)
     /** 복구 완료 안내 카드. 몇 초 뒤 스스로 사라진다. */
     fun done(title: String, body: String)
+    /** 머고가 말로 하는 안내를 글자로도 보여 주는 카드. 소리를 못 듣거나 음성 엔진이 멈춰도 볼 수 있게. 몇 초 뒤 사라진다. */
+    fun notice(text: String)
     fun dismiss()
 }
