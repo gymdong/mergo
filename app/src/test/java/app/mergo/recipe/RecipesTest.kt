@@ -119,6 +119,40 @@ class RecipesTest {
     }
 
     @Test
+    fun `복구한 영상 앞에 광고가 나오면 건너뛰기를 누르고 제목이 같아질 때까지 기다린다`() = runTest {
+        val screen = FakeScreen()
+        val device = FakeDevice()
+        var title = "오늘의 뉴스"
+        val historyItem = n(text = "트로트 메들리")
+        val skip = n(text = "광고 건너뛰기", viewId = "$yt:id/skip_ad_button")
+        screen.nodeList = listOf(n(desc = "이전 동영상"))
+        device.onOpenUri = { screen.nodeList = listOf(historyItem) }
+        screen.onClick = {
+            if (it === historyItem) screen.nodeList = listOf(n(text = "Sponsored · 0:15", viewId = "$yt:id/ad_progress_text"), skip)
+            if (it === skip) { screen.nodeList = emptyList(); title = "트로트 메들리" }
+        }
+        val outcome = RestoreVideo(screen, device, { title }, FakeAgent(), verifyTimeoutMs = 600)
+            .run(mapOf("title" to "트로트 메들리", "mode" to "mistouch"))
+        assertEquals(RecipeOutcome.Verified(), outcome)
+        assertTrue(skip in screen.clicks)
+    }
+
+    @Test
+    fun `광고가 건너뛸 수 없고 끝나지 않으면 한도까지 기다린 뒤 실패한다`() = runTest {
+        val screen = FakeScreen()
+        val device = FakeDevice()
+        val historyItem = n(text = "트로트 메들리")
+        screen.nodeList = listOf(n(desc = "이전 동영상"))
+        device.onOpenUri = { screen.nodeList = listOf(historyItem) }
+        screen.onClick = {
+            if (it === historyItem) screen.nodeList = listOf(n(text = "Sponsored · 0:15", viewId = "$yt:id/ad_progress_text"))
+        }
+        val outcome = RestoreVideo(screen, device, { "다른 영상" }, FakeAgent(), verifyTimeoutMs = 600, adMaxMs = 3_000)
+            .run(mapOf("title" to "트로트 메들리", "mode" to "mistouch"))
+        assertEquals(RecipeOutcome.Failed(FailReason.NOT_REACHED), outcome)
+    }
+
+    @Test
     fun `조작 뒤 영상 제목을 읽지 못하면 실패가 아니라 검증 불가`() = runTest {
         val screen = FakeScreen()
         val prev = n(desc = "이전 동영상")

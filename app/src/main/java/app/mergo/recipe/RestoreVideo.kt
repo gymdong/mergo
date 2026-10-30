@@ -1,6 +1,7 @@
 package app.mergo.recipe
 
 import app.mergo.model.FailReason
+import app.mergo.model.Marker
 import app.mergo.model.Recipe
 import app.mergo.model.RecipeIds
 import app.mergo.model.RecipeOutcome
@@ -20,8 +21,10 @@ class RestoreVideo(
     private val device: DeviceActions,
     private val currentTitle: () -> String?,
     private val agent: ScreenAgent,
-    // 복구 10초 목표(AC-T1)를 지키려고 단계마다 짧게 확인한다.
+    // 복구 10초 목표(AC-T1)를 지키려고 단계마다 짧게 확인한다. 광고가 나오는 시간은 이 한도에 세지 않는다.
     private val verifyTimeoutMs: Long = 3_000,
+    private val adMaxMs: Long = 35_000,
+    private val pollMs: Long = 300,
 ) : Recipe {
     override val id = RecipeIds.RESTORE_VIDEO
 
@@ -29,9 +32,7 @@ class RestoreVideo(
         // 돌아갈 정상 상태 영상이 없으면 아무것도 누르지 않는다.
         val title = params["title"]?.takeIf { it.isNotBlank() } ?: return RecipeOutcome.Failed(FailReason.PRECONDITION)
         // 제목을 읽지 못하면(null) 실패가 아니라 검증 불가다.
-        val verify: suspend () -> Boolean? = {
-            Verifier.waitFor(verifyTimeoutMs) { currentTitle()?.let { YouTubeSignals.sameTitle(it, title) } }
-        }
+        val verify: suspend () -> Boolean? = { awaitTitle(title) }
         val previous = Step("previous_button", { pressPrevious() }, verify)
         val history = Step("watch_history", { openFromHistory(title) }, verify, cleanup = { leaveHistory() })
         val byAgent = Step("screen_agent", { agent.achieve("'$title' 영상 재생") }, verify)
@@ -41,6 +42,36 @@ class RestoreVideo(
         }
         val steps = if (params["mode"] == "mistouch") listOf(history, previous, byAgent) else listOf(previous, history, byAgent)
         return StepChain.run(id, steps)
+    }
+
+    /**
+     * 영상이 열려 제목이 같아질 때까지 기다린다. 열린 영상 앞에 광고가 붙으면(머고가 복구하는 동안은 광고 자동 넘기기가
+     * 꺼져 있다) 건너뛰기 버튼을 누르고, 버튼이 없으면 광고가 끝나기를 [adMaxMs]까지 기다린다.
+     * 제목을 한 번도 읽지 못했으면 null(검증 불가).
+     */
+    private suspend fun awaitTitle(title: String): Boolean? {
+        var quiet = 0L
+        var ad = 0L
+        var read = false
+        while (true) {
+            val now = currentTitle()
+            if (now != null) {
+                read = true
+                if (YouTubeSignals.sameTitle(now, title)) return true
+            }
+            val nodes = runCatching { screen.nodes() }.getOrDefault(emptyList())
+            val markers = YouTubeSignals.markers(nodes)
+            if (Marker.AD_SHOWING in markers || Marker.AD_SKIP_VISIBLE in markers) {
+                val player = YouTubeSignals.playerNode(nodes)
+                nodes.firstOrNull { YouTubeSignals.isSkipButton(it, player) }?.let { screen.click(it.id) }
+                if (ad >= adMaxMs) return if (read) false else null
+                ad += pollMs
+            } else {
+                if (quiet >= verifyTimeoutMs) return if (read) false else null
+                quiet += pollMs
+            }
+            delay(pollMs)
+        }
     }
 
     private suspend fun ensureYouTube() {
